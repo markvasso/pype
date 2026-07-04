@@ -14,7 +14,6 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem _exitItem;
     private System.Drawing.Icon? _ownedIcon;
     private bool _isTyping;
-    private bool _runAtLoginKnownEnabled;
 
     public TrayAppContext()
     {
@@ -32,7 +31,7 @@ internal sealed class TrayAppContext : ApplicationContext
             Visible = true
         };
 
-        _runAtLoginItem = new ToolStripMenuItem("Run at Login", null, async (_, _) => await ToggleRunAtLoginAsync());
+        _runAtLoginItem = new ToolStripMenuItem("Run at Login", null, (_, _) => ToggleRunAtLogin());
         _exitItem = new ToolStripMenuItem("Exit", null, (_, _) => ExitApp());
 
         var menu = new ContextMenuStrip();
@@ -41,20 +40,14 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(_runAtLoginItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_exitItem);
-        // Apply state synchronously as the menu opens so it's visible on THIS
-        // open, not the next one. The Run-at-Login checkmark comes from a
-        // cached value because querying it fresh means shelling out to
-        // schtasks.exe (tens to hundreds of ms) - too slow to block the menu
-        // render on, and an `await` here would apply the checkmark only after
-        // the menu is already on screen. So: show the last-known state
-        // instantly, then refresh the cache in the background so it's correct
-        // next open (and picks up any external change, e.g. the installer
-        // re-running or Task Scheduler being edited by hand).
+        // Apply state synchronously as the menu opens so it's correct on the
+        // first (and every) open. AutoStartManager now reads the Run registry
+        // key directly - a fast, synchronous local call - so unlike the old
+        // schtasks-based approach there's no round-trip to hide behind a cache.
         menu.Opening += (_, _) =>
         {
             _exitItem.Enabled = !_isTyping;
-            _runAtLoginItem.Checked = _runAtLoginKnownEnabled;
-            _ = RefreshRunAtLoginCheckedAsync();
+            _runAtLoginItem.Checked = AutoStartManager.IsEnabled();
         };
         _trayIcon.ContextMenuStrip = menu;
 
@@ -74,9 +67,18 @@ internal sealed class TrayAppContext : ApplicationContext
             _trayIcon.ShowBalloonTip(5000, "pype", ex.Message, ToolTipIcon.Error);
         }
 
-        // Prime the cached Run-at-Login state so the checkmark is correct on
-        // the first menu open, not just from the second onward.
-        _ = RefreshRunAtLoginCheckedAsync();
+        // Run the update check once, after the message loop is actually up.
+        // Doing it here in the constructor would start the async work before
+        // Application.Run installs the WinForms SynchronizationContext, so the
+        // continuation (which shows UI) could resume off the UI thread.
+        // Application.Idle first fires once the loop is running.
+        Application.Idle += OnFirstIdle;
+    }
+
+    private void OnFirstIdle(object? sender, EventArgs e)
+    {
+        Application.Idle -= OnFirstIdle;
+        _ = CheckForUpdatesAsync();
     }
 
     private async void OnHotkeyPressed()
@@ -193,44 +195,12 @@ internal sealed class TrayAppContext : ApplicationContext
         return text[..length];
     }
 
-    private async Task RefreshRunAtLoginCheckedAsync()
+    private void ToggleRunAtLogin()
     {
-        try
-        {
-            _runAtLoginKnownEnabled = await AutoStartManager.IsEnabledAsync() == true;
-            _runAtLoginItem.Checked = _runAtLoginKnownEnabled;
-        }
-        catch
-        {
-            // Best-effort status refresh (called fire-and-forget from the menu
-            // Opening/constructor). If querying the task throws - e.g.
-            // schtasks.exe can't be launched - just keep the last-known
-            // checkmark rather than letting an unobserved Task exception drop
-            // silently or, worse, surface elsewhere.
-        }
-    }
-
-    private async Task ToggleRunAtLoginAsync()
-    {
-        bool enable = !_runAtLoginItem.Checked;
-        bool ok;
-        string error;
-        try
-        {
-            (ok, error) = enable
-                ? await AutoStartManager.TryEnableAsync()
-                : await AutoStartManager.TryDisableAsync();
-        }
-        catch (Exception ex)
-        {
-            // TryEnable/TryDisable translate a non-zero schtasks exit into a
-            // clean (false, error), but a thrown exception (e.g. schtasks.exe
-            // unresolvable) would otherwise escape this async void click
-            // handler onto the UI thread. Handle it here so the user gets the
-            // same tidy balloon.
-            ok = false;
-            error = ex.Message;
-        }
+        bool enable = !AutoStartManager.IsEnabled();
+        bool ok = enable
+            ? AutoStartManager.TryEnable(out string error)
+            : AutoStartManager.TryDisable(out error);
 
         if (!ok)
         {
@@ -240,21 +210,83 @@ internal sealed class TrayAppContext : ApplicationContext
                 $"Could not {(enable ? "enable" : "disable")} Run at Login: {error}",
                 ToolTipIcon.Error);
         }
+        else if (!enable && AutoStartManager.IsEnabled())
+        {
+            // The tray toggle only manages the per-user (HKCU) entry. If
+            // autostart is still on after a "disable", it's held by a
+            // machine-wide (HKLM) entry an admin/RMM set - a standard user
+            // can't remove it. Explain rather than appear to do nothing.
+            _trayIcon.ShowBalloonTip(
+                5000,
+                "pype",
+                "Run at Login is managed for all users (set by an administrator) and can't be turned off here.",
+                ToolTipIcon.Info);
+        }
 
-        // Re-query rather than assume: a Machine-scope task installed by an
-        // admin/RMM commonly can't be modified by a standard user, so this
-        // reflects what actually happened rather than the attempted state.
-        await RefreshRunAtLoginCheckedAsync();
+        // Reflect what actually happened rather than assuming.
+        _runAtLoginItem.Checked = AutoStartManager.IsEnabled();
     }
 
     private void ShowAbout()
     {
-        MessageBox.Show(
-            $"{AppInfo.DisplayName}\n\nPress Ctrl+Shift+V anywhere to type the clipboard's text content.\n" +
-            $"Text over {AppInfo.MaxTypeLength} characters is truncated, with a notice explaining why.",
-            "About pype",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Information);
+        ShowInfoWithLink(
+            caption: "About pype",
+            heading: AppInfo.DisplayName,
+            body: "Press Ctrl+Shift+V anywhere to type the clipboard's text content.\n" +
+                  $"Text over {AppInfo.MaxTypeLength} characters is truncated.",
+            url: AppInfo.RepoUrl);
+    }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        string? newer = await UpdateChecker.GetNewerVersionAsync();
+        if (newer is null) return; // up to date, offline, or check failed - stay quiet
+
+        ShowInfoWithLink(
+            caption: "pype update available",
+            heading: $"pype {newer} is available",
+            body: $"You're running {UpdateChecker.LocalVersionString}. A newer version can be downloaded from the releases page.",
+            url: AppInfo.ReleasesUrl);
+    }
+
+    // Shows an info dialog whose text includes a clickable link. Uses the modern
+    // TaskDialog (which renders <a> links); if that's unavailable for any reason
+    // it falls back to a plain MessageBox that still shows the URL as text.
+    private static void ShowInfoWithLink(string caption, string heading, string body, string url)
+    {
+        try
+        {
+            var page = new TaskDialogPage
+            {
+                Caption = caption,
+                Heading = heading,
+                Text = $"{body}\n\n<a href=\"{url}\">{url}</a>",
+                Icon = TaskDialogIcon.Information,
+                EnableLinks = true,
+            };
+            page.LinkClicked += (_, e) => OpenUrl(string.IsNullOrEmpty(e.LinkHref) ? url : e.LinkHref);
+            TaskDialog.ShowDialog(page);
+        }
+        catch
+        {
+            MessageBox.Show(
+                $"{heading}\n\n{body}\n\n{url}",
+                caption,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch
+        {
+            // Opening a browser is best-effort; nothing useful to do on failure.
+        }
     }
 
     private void ExitApp()

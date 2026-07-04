@@ -1,98 +1,96 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 pype contributors
 
-using System.Diagnostics;
-using System.Linq;
-using System.Threading.Tasks;
+using Microsoft.Win32;
 using System.Windows.Forms;
-using System.Xml.Linq;
 
 namespace Pype;
 
 /// <summary>
-/// Controls the SAME Scheduled Task the installer registers (see
-/// installer/Install-Pype.ps1), so there's exactly one autostart mechanism
-/// whether it was set up by the installer or toggled from the tray menu.
-/// Shells out to schtasks.exe rather than using the Task Scheduler COM API
-/// directly, to avoid a COM interop dependency for a single small feature.
-/// Everything here is async so it doesn't stall the WinForms message pump —
-/// this is called from the tray context menu's Opening/Click handlers, which
-/// run on the UI thread.
+/// Controls whether pype starts at login via the standard "Run" registry key
+/// (HKCU\...\CurrentVersion\Run for per-user, HKLM\... for machine-wide). This
+/// is deliberately NOT a Scheduled Task: Run-key entries are what Windows Task
+/// Manager's "Startup apps" tab lists and lets the user enable/disable, so the
+/// autostart is visible and manageable where users expect it. The installer
+/// writes the same key, giving one visible source of truth. Registry reads are
+/// fast and synchronous, so the tray checkmark reflects real state immediately
+/// on menu open (no async round-trip like the old schtasks approach needed).
 /// </summary>
 internal static class AutoStartManager
 {
-    private const string TaskName = "pype-clipboard-typer";
+    private const string RunSubKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string StartupApprovedSubKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+    private const string ValueName = "pype";
 
-    /// <returns>
-    /// True/false if the task exists, or null if it doesn't exist at all
-    /// (e.g. pype was run standalone without ever being installed).
-    /// </returns>
-    public static async Task<bool?> IsEnabledAsync()
+    /// <summary>
+    /// True if pype will start at login for the current user — a per-user
+    /// (HKCU) or machine-wide (HKLM) Run entry exists and isn't disabled in
+    /// Task Manager's Startup tab.
+    /// </summary>
+    public static bool IsEnabled()
     {
-        // /XML dumps the task's definition in Task Scheduler's fixed XML
-        // schema, not the human-readable /FO LIST report — the latter is
-        // localized (e.g. "Scheduled Task State:" is translated on non-English
-        // Windows), which would silently break a string match against it.
-        var (exitCode, output) = await RunSchtasksAsync($"/Query /TN \"{TaskName}\" /XML");
-        if (exitCode != 0) return null;
+        return IsEnabledIn(Registry.CurrentUser) || IsEnabledIn(Registry.LocalMachine);
+    }
 
+    private static bool IsEnabledIn(RegistryKey root)
+    {
+        using var run = root.OpenSubKey(RunSubKey);
+        if (run?.GetValue(ValueName) is null) return false;
+
+        // Task Manager records its enable/disable state here; an absent entry
+        // means enabled. When present, the leading byte's low bit set means the
+        // user disabled the entry in the Startup tab, so honor that.
+        using var approved = root.OpenSubKey(StartupApprovedSubKey);
+        if (approved?.GetValue(ValueName) is byte[] flag && flag.Length > 0 && (flag[0] & 1) != 0)
+        {
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Enables autostart for the current user (HKCU). Note: enabling/disabling
+    /// from the tray always targets HKCU — a machine-wide (HKLM) entry written
+    /// by an elevated/RMM install can't be changed by a standard user, which is
+    /// the correct behavior for IT-managed autostart.
+    /// </summary>
+    public static bool TryEnable(out string error)
+    {
+        error = string.Empty;
         try
         {
-            var doc = XDocument.Parse(output);
-            var enabledElement = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "Enabled");
-            return enabledElement is not null && bool.Parse(enabledElement.Value);
+            using (var run = Registry.CurrentUser.CreateSubKey(RunSubKey))
+            {
+                run.SetValue(ValueName, $"\"{Application.ExecutablePath}\"", RegistryValueKind.String);
+            }
+
+            // If the user previously disabled pype in Task Manager's Startup
+            // tab, clearing that record lets enabling from the tray actually
+            // take effect (otherwise the entry would exist but stay disabled).
+            using var approved = Registry.CurrentUser.OpenSubKey(StartupApprovedSubKey, writable: true);
+            approved?.DeleteValue(ValueName, throwOnMissingValue: false);
+            return true;
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            error = ex.Message;
+            return false;
         }
     }
 
-    public static async Task<(bool Success, string Error)> TryEnableAsync()
+    public static bool TryDisable(out string error)
     {
-        if (await IsEnabledAsync() is null)
+        error = string.Empty;
+        try
         {
-            // No task registered yet (standalone run, or -NoAutoStart was used
-            // at install time) — create a simple current-user one on demand.
-            // No admin rights needed: it only runs for whoever enables it.
-            string exePath = Application.ExecutablePath;
-            var (createCode, createOutput) = await RunSchtasksAsync(
-                $"/Create /TN \"{TaskName}\" /TR \"\\\"{exePath}\\\"\" /SC ONLOGON /RL LIMITED /F");
-            return createCode == 0 ? (true, string.Empty) : (false, createOutput);
+            using var run = Registry.CurrentUser.OpenSubKey(RunSubKey, writable: true);
+            run?.DeleteValue(ValueName, throwOnMissingValue: false);
+            return true;
         }
-
-        var (exitCode, output) = await RunSchtasksAsync($"/Change /TN \"{TaskName}\" /ENABLE");
-        return exitCode == 0 ? (true, string.Empty) : (false, output);
-    }
-
-    public static async Task<(bool Success, string Error)> TryDisableAsync()
-    {
-        var (exitCode, output) = await RunSchtasksAsync($"/Change /TN \"{TaskName}\" /DISABLE");
-        return exitCode == 0 ? (true, string.Empty) : (false, output);
-    }
-
-    private static async Task<(int ExitCode, string Output)> RunSchtasksAsync(string arguments)
-    {
-        var psi = new ProcessStartInfo
+        catch (Exception ex)
         {
-            FileName = "schtasks.exe",
-            Arguments = arguments,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-
-        using var process = Process.Start(psi);
-        if (process is null) return (-1, "Could not start schtasks.exe.");
-
-        Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
-        Task<string> stderrTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        string stdout = await stdoutTask;
-        string stderr = await stderrTask;
-
-        string output = string.IsNullOrWhiteSpace(stdout) ? stderr : stdout;
-        return (process.ExitCode, output.Trim());
+            error = ex.Message;
+            return false;
+        }
     }
 }

@@ -31,11 +31,16 @@ manager — one hotkey, one job.
   huge or unexpected clipboard contents never silently dumps somewhere.
 - Typing is paced (fast, but visible), not an instant flash — a clear signal
   it's pype doing the typing.
-- Tray icon (Windows) / menu bar item (macOS) with About, a Run at Login
-  toggle, and Exit/Quit. macOS additionally shows live Accessibility-
-  permission status and a one-click way to open the setting.
+- Tray icon (Windows) / menu bar item (macOS) with About (links to GitHub),
+  a Run at Login toggle, and Exit/Quit. macOS additionally shows live
+  Accessibility-permission status and a one-click way to open the setting.
+- Run at Login that's visible where users expect it — Task Manager's Startup
+  tab on Windows (a `Run` key entry), Login Items on macOS (`SMAppService`).
+- Checks GitHub on launch for a newer release and points you to the download
+  if there is one. This is the only network call pype makes.
 - Installers with silent switches for unattended/scripted deployment:
-  PowerShell + NSIS GUI installer on Windows, `.pkg` on macOS.
+  PowerShell + NSIS GUI installer on Windows, `.pkg` on macOS. Re-running an
+  installer cleans the prior version first and keeps your autostart choice.
 - Windows: registers in the standard Programs-and-Features registry
   location with a real version number, so RMM/patch-management tooling can
   see and manage it like any other installed app.
@@ -59,14 +64,14 @@ Two independent implementations, one per OS — see the platform's own README
 for build, install, and usage instructions:
 
 - **[Windows](windows/README.md)** — C#/.NET WinForms tray app. PowerShell
-  and GUI (NSIS) installers, Scheduled Task autostart, registry
-  integration for RMM/patch-management tools.
+  and GUI (NSIS) installers, `Run`-key autostart (visible in Task Manager),
+  registry integration for RMM/patch-management tools.
 - **[macOS](mac/README.md)** — Swift/AppKit menu bar app. `.pkg` installer,
   `SMAppService` autostart.
 
 Neither is a port of the other — none of the Windows-specific mechanisms
-(WinForms, Win32 P/Invoke, Scheduled Tasks, the registry) exist on macOS, and
-vice versa. Each platform's README explains its own architecture in full.
+(WinForms, Win32 P/Invoke, the registry) exist on macOS, and vice versa. Each
+platform's README explains its own architecture in full.
 
 ## License
 

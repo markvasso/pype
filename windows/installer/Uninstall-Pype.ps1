@@ -3,9 +3,10 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Uninstalls pype: stops the running process, removes the logon Scheduled
-    Task, deletes the install directory, and removes the registry Uninstall
-    key registered by Install-Pype.ps1.
+    Uninstalls pype: stops the running process, removes autostart (the Run
+    registry key, plus the legacy Scheduled Task older versions used), deletes
+    the install directory, and removes the registry Uninstall key and Start
+    Menu shortcuts registered by Install-Pype.ps1.
 
 .PARAMETER Silent
     Suppresses console output (still writes to the log file) and never prompts.
@@ -88,6 +89,17 @@ function Remove-PypeScope {
 
     $dir = if ($OverrideInstallDir) { $OverrideInstallDir } else { Get-DefaultInstallDir -ScopeName $ScopeName }
     $regPath = if ($ScopeName -eq 'Machine') { $hklmRegPath } else { $hkcuRegPath }
+    $regRoot = if ($ScopeName -eq 'Machine') { 'HKLM:' } else { 'HKCU:' }
+
+    # Remove the autostart Run key entry (and any Task Manager enable/disable
+    # record for it) for this scope.
+    $runKeyPath = "$regRoot\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+    $approvedPath = "$regRoot\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+    foreach ($p in @($runKeyPath, $approvedPath)) {
+        if (Test-Path -LiteralPath $p) {
+            Remove-ItemProperty -LiteralPath $p -Name 'pype' -Force -ErrorAction SilentlyContinue
+        }
+    }
 
     if (Test-Path -LiteralPath $regPath) {
         Remove-Item -LiteralPath $regPath -Recurse -Force

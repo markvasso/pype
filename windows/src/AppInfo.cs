@@ -25,4 +25,13 @@ internal static class AppInfo
     public const string MutexName = "Local\\Pype.SingleInstance.Mutex";
 
     public const int HotkeyId = 0xB001;
+
+    /// <summary>Project home, shown/linked in the About dialog.</summary>
+    public const string RepoUrl = "https://github.com/markvasso/pype";
+
+    /// <summary>Where the launch-time update check sends users to download a newer version.</summary>
+    public const string ReleasesUrl = "https://github.com/markvasso/pype/releases";
+
+    /// <summary>GitHub API endpoint the update check reads the latest release tag from.</summary>
+    public const string LatestReleaseApiUrl = "https://api.github.com/repos/markvasso/pype/releases/latest";
 }

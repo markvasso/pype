@@ -141,14 +141,39 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     @objc private func showAbout() {
         let alert = NSAlert()
-        alert.messageText = AppInfo.displayName
+        alert.messageText = "\(AppInfo.displayName) \(AppInfo.version)"
         alert.informativeText = """
             Press Cmd+Shift+V anywhere to type the clipboard's text content.
-            Text over \(AppInfo.maxTypeLength) characters is truncated, with a notice explaining why.
+            Text over \(AppInfo.maxTypeLength) characters is truncated.
             """
         alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "View on GitHub")
         NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
+        if alert.runModal() == .alertSecondButtonReturn {
+            openURL(AppInfo.repoUrl)
+        }
+    }
+
+    /// Shows a modal notice that a newer release exists, with a button that
+    /// opens the releases page. Called once at launch (see AppDelegate).
+    func notifyUpdateAvailable(_ newerVersion: String) {
+        let alert = NSAlert()
+        alert.messageText = "pype \(newerVersion) is available"
+        alert.informativeText = "You're running \(AppInfo.version). A newer version can be downloaded from the releases page."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Download")
+        alert.addButton(withTitle: "Later")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            openURL(AppInfo.releasesUrl)
+        }
+    }
+
+    private func openURL(_ string: String) {
+        if let url = URL(string: string) {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func quit() {

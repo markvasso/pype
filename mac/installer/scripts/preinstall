@@ -1,0 +1,24 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 pype contributors
+#
+# Runs before pkgbuild lays down the new pype.app. Removes any prior install
+# so the new one lands in a clean environment (no stale files a newer version
+# no longer ships). Best-effort: failures here shouldn't block the install.
+#
+# User preferences are preserved: pype's only persistent preference is its
+# Login Item registration (SMAppService), which lives in the system's
+# background-task database, NOT inside the app bundle - so removing the bundle
+# here leaves the "Run at Login" choice intact.
+
+# Stop a running instance first so its open files don't linger.
+pkill -f "/Applications/pype.app/Contents/MacOS/pype" 2>/dev/null || true
+sleep 1
+
+# Remove the old bundle. pkgbuild would overwrite files, but a plain overwrite
+# leaves behind anything the new version dropped - a clean rm avoids that.
+if [ -d "/Applications/pype.app" ]; then
+    rm -rf "/Applications/pype.app" || true
+fi
+
+exit 0

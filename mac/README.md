@@ -22,7 +22,7 @@ mapped to the closest macOS equivalent:
 | `Clipboard.GetText()` | `NSPasteboard.general` |
 | System tray `NotifyIcon` | Menu bar `NSStatusItem` |
 | Balloon tip | `UNUserNotificationCenter` |
-| Scheduled Task autostart | `SMAppService.mainApp` (macOS 13+) |
+| `Run`-key autostart | `SMAppService.mainApp` (macOS 13+) |
 | PowerShell installer / NSIS | `.pkg` via `pkgbuild`, silent-installable via `installer -pkg ... -target /` |
 
 ## Permissions (the one real platform difference)
@@ -130,9 +130,16 @@ LaunchAgent plist file — `SMAppService.mainApp` manages that internally).
 ## Usage
 
 Copy any text to the clipboard, click wherever you want it typed, then press
-**Cmd+Shift+V**. Click the menu bar icon for About, the Accessibility status
-/ "Grant Accessibility Access…" item, a "Run at Login" toggle (checkmark when
-active), and Quit.
+**Cmd+Shift+V**. Click the menu bar icon for About (which links to the GitHub
+page), the Accessibility status / "Grant Accessibility Access…" item, a "Run
+at Login" toggle (checkmark when active), and Quit.
+
+## Update check
+
+On launch pype checks the GitHub releases API once for a newer version and, if
+found, shows a notice with a button to open the downloads page. This is the
+only network request pype makes — it sends no data beyond a standard API call
+and fails silently offline.
 
 ## Testing notes
 
