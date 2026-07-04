@@ -31,7 +31,9 @@ manager — one hotkey, one job.
   huge or unexpected clipboard contents never silently dumps somewhere.
 - Typing is paced (fast, but visible), not an instant flash — a clear signal
   it's pype doing the typing.
-- Tray icon (Windows) / menu bar item (macOS): About, Run at Login, Exit.
+- Tray icon (Windows) / menu bar item (macOS) with About, a Run at Login
+  toggle, and Exit/Quit. macOS additionally shows live Accessibility-
+  permission status and a one-click way to open the setting.
 - Installers with silent switches for unattended/scripted deployment:
   PowerShell + NSIS GUI installer on Windows, `.pkg` on macOS.
 - Windows: registers in the standard Programs-and-Features registry

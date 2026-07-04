@@ -168,6 +168,34 @@ try {
             Join-Path $env:LOCALAPPDATA 'pype'
         }
     }
+    elseif ($resolvedScope -eq 'Machine') {
+        # Security check for machine-wide installs: the logon task runs
+        # pype.exe for EVERY interactive user, so if the exe sits somewhere a
+        # standard (non-admin) user can write, that user could replace it and
+        # get their code run in other users' sessions. The default
+        # %ProgramFiles%\pype is admin-only and safe; a custom -InstallDir
+        # under a user-writable location (e.g. a profile folder) is not.
+        # Block the obvious footguns rather than silently creating a
+        # privilege-escalation primitive. Matching is on a path-component
+        # boundary (equal, or prefix + '\') so "C:\Program Files Evil" doesn't
+        # sneak past a naive "starts with C:\Program Files" check.
+        $normalized = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd('\')
+        $protectedRoots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432, $env:WINDIR) |
+            Where-Object { $_ } |
+            ForEach-Object { [System.IO.Path]::GetFullPath($_).TrimEnd('\') } |
+            Select-Object -Unique
+        $isProtected = $false
+        foreach ($root in $protectedRoots) {
+            if ($normalized -eq $root -or
+                $normalized.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                $isProtected = $true
+                break
+            }
+        }
+        if (-not $isProtected) {
+            Fail "For a machine-wide install, -InstallDir must be under a protected, admin-only location (e.g. `"$env:ProgramFiles\pype`"). Installing to a user-writable path would let a standard user replace pype.exe and run code in other users' logon sessions. Use -Scope User for a per-user install to a custom location instead."
+        }
+    }
 
     $regPath = if ($resolvedScope -eq 'Machine') {
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\pype'

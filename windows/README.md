@@ -28,15 +28,19 @@ manually launch — it's just not registered with the Service Control Manager.
 - On trigger, it reads clipboard text (`Clipboard.GetText`, with retry since
   the clipboard is a shared OS resource other apps can transiently hold).
 - Text is typed via `SendInput` using `KEYEVENTF_UNICODE`, which sends raw
-  Unicode code points regardless of keyboard layout — fast (one batched
-  native call) and correct for non-ASCII text. Line endings (CRLF, lone CR,
-  or lone LF) are each converted to a single Enter keystroke. If Windows
-  blocks the injection (most commonly UIPI, when the target window is
-  running elevated as Administrator), a tray notice explains that too.
+  Unicode code points regardless of keyboard layout — correct for non-ASCII
+  text. Characters are sent one at a time with a short (~10ms) delay between
+  them, so typing is fast but *visibly* pype doing it rather than an
+  instantaneous flash indistinguishable from a normal paste. Line endings
+  (CRLF, lone CR, or lone LF) are each converted to a single Enter keystroke.
+  If Windows blocks the injection (most commonly UIPI, when the target window
+  is running elevated as Administrator), a tray notice explains that too.
 - Text over 128 characters is truncated to the first 128 (without splitting
   a UTF-16 surrogate pair across the boundary), and a non-blocking tray
   balloon notification explains the truncation while typing proceeds
   immediately.
+- The tray right-click menu shows a checkmark next to "Run at Login" when
+  autostart is currently active.
 - "Run at Login" (right-click the tray icon) doesn't introduce a second
   autostart mechanism — it enables/disables the *same* Scheduled Task the
   installer creates (via `schtasks.exe`), so there's exactly one source of
@@ -47,6 +51,24 @@ manually launch — it's just not registered with the Service Control Manager.
   won't be able to turn it off from the tray — `schtasks.exe` denies the
   modification, which is arguably the correct behavior for IT-managed
   software.
+
+## SmartScreen / antivirus warnings
+
+`pype.exe` and `PypeSetup.exe` are **not code-signed** (that needs a paid
+certificate). Two consequences to expect:
+
+- **SmartScreen**: first run shows "Windows protected your PC / unknown
+  publisher." Click **More info → Run anyway**. It'll flag it until the
+  binary earns reputation (which unsigned apps effectively never do).
+- **Antivirus**: an app whose entire purpose is synthesizing keystrokes from
+  the clipboard looks, to a heuristic scanner, a lot like the input-injection
+  step of malware. False-positive flags are plausible. The full source is in
+  this repo — build it yourself (see [Building](#building)) if you'd rather
+  not trust a prebuilt binary, and add an AV exclusion for the install path
+  if your scanner quarantines it.
+
+Signing + reputation is the only real fix; it's a deliberate cost tradeoff
+for a free tool.
 
 ## Requirements
 
@@ -132,7 +154,7 @@ switch):
 |---|---|
 | `-SystemWide` | Install for all users instead of just you — `%ProgramFiles%\pype`, `HKLM`, starts for whichever user logs on. Requires an elevated session. Shorthand for `-Scope Machine`; the `.cmd` wrapper's `/ALLUSERS` maps to this. |
 | `-Scope Machine\|User\|Auto` | Force a scope instead of auto-detecting |
-| `-InstallDir <path>` | Install somewhere other than the scope's default |
+| `-InstallDir <path>` | Install somewhere other than the scope's default. For a **machine-wide** install this must be an admin-only location (under `%ProgramFiles%` or `%WINDIR%`) — the installer refuses a user-writable path, since the all-users logon task would otherwise let a standard user swap `pype.exe` and run code in other users' sessions. Per-user installs have no such restriction. |
 | `-NoAutoStart` | Don't register the logon Scheduled Task |
 | `-NoStartNow` | Don't launch pype immediately after installing |
 | `-NoStartMenuShortcut` | Don't create the Start Menu shortcuts |

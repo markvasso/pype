@@ -14,6 +14,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem _exitItem;
     private System.Drawing.Icon? _ownedIcon;
     private bool _isTyping;
+    private bool _runAtLoginKnownEnabled;
 
     public TrayAppContext()
     {
@@ -40,16 +41,20 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(_runAtLoginItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_exitItem);
-        // Re-check each time the menu opens rather than caching Checked, since
-        // the underlying Scheduled Task can also be changed by the installer
-        // or by re-running it, outside of this process. Async so opening the
-        // menu doesn't stall the UI/message-pump thread on a schtasks.exe call.
-        // Also re-applies _exitItem's disabled-while-typing state, in case the
-        // menu is opened after typing already started.
-        menu.Opening += async (_, _) =>
+        // Apply state synchronously as the menu opens so it's visible on THIS
+        // open, not the next one. The Run-at-Login checkmark comes from a
+        // cached value because querying it fresh means shelling out to
+        // schtasks.exe (tens to hundreds of ms) - too slow to block the menu
+        // render on, and an `await` here would apply the checkmark only after
+        // the menu is already on screen. So: show the last-known state
+        // instantly, then refresh the cache in the background so it's correct
+        // next open (and picks up any external change, e.g. the installer
+        // re-running or Task Scheduler being edited by hand).
+        menu.Opening += (_, _) =>
         {
             _exitItem.Enabled = !_isTyping;
-            await RefreshRunAtLoginCheckedAsync();
+            _runAtLoginItem.Checked = _runAtLoginKnownEnabled;
+            _ = RefreshRunAtLoginCheckedAsync();
         };
         _trayIcon.ContextMenuStrip = menu;
 
@@ -68,6 +73,10 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             _trayIcon.ShowBalloonTip(5000, "pype", ex.Message, ToolTipIcon.Error);
         }
+
+        // Prime the cached Run-at-Login state so the checkmark is correct on
+        // the first menu open, not just from the second onward.
+        _ = RefreshRunAtLoginCheckedAsync();
     }
 
     private async void OnHotkeyPressed()
@@ -133,6 +142,14 @@ internal sealed class TrayAppContext : ApplicationContext
                     ToolTipIcon.Warning);
             }
         }
+        catch (Exception ex)
+        {
+            // Core action - keep any unexpected failure in the typing path a
+            // dismissible balloon rather than letting it escape this async void
+            // handler onto the UI thread (Program.cs has a global backstop, but
+            // a balloon is friendlier than its generic error dialog).
+            _trayIcon.ShowBalloonTip(4000, "pype", $"Could not type the clipboard: {ex.Message}", ToolTipIcon.Error);
+        }
         finally
         {
             _isTyping = false;
@@ -178,15 +195,42 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private async Task RefreshRunAtLoginCheckedAsync()
     {
-        _runAtLoginItem.Checked = await AutoStartManager.IsEnabledAsync() == true;
+        try
+        {
+            _runAtLoginKnownEnabled = await AutoStartManager.IsEnabledAsync() == true;
+            _runAtLoginItem.Checked = _runAtLoginKnownEnabled;
+        }
+        catch
+        {
+            // Best-effort status refresh (called fire-and-forget from the menu
+            // Opening/constructor). If querying the task throws - e.g.
+            // schtasks.exe can't be launched - just keep the last-known
+            // checkmark rather than letting an unobserved Task exception drop
+            // silently or, worse, surface elsewhere.
+        }
     }
 
     private async Task ToggleRunAtLoginAsync()
     {
         bool enable = !_runAtLoginItem.Checked;
-        (bool ok, string error) = enable
-            ? await AutoStartManager.TryEnableAsync()
-            : await AutoStartManager.TryDisableAsync();
+        bool ok;
+        string error;
+        try
+        {
+            (ok, error) = enable
+                ? await AutoStartManager.TryEnableAsync()
+                : await AutoStartManager.TryDisableAsync();
+        }
+        catch (Exception ex)
+        {
+            // TryEnable/TryDisable translate a non-zero schtasks exit into a
+            // clean (false, error), but a thrown exception (e.g. schtasks.exe
+            // unresolvable) would otherwise escape this async void click
+            // handler onto the UI thread. Handle it here so the user gets the
+            // same tidy balloon.
+            ok = false;
+            error = ex.Message;
+        }
 
         if (!ok)
         {

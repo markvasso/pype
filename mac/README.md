@@ -31,14 +31,40 @@ macOS gates both hotkey detection and keystroke injection behind explicit,
 one-time user consent — there's no way around this, unlike Windows:
 
 - **Accessibility** (System Settings > Privacy & Security > Accessibility):
-  required for `ClipboardTyper` to inject keystrokes. Without it,
-  `AXIsProcessTrusted()` returns false and pype shows a notification telling
-  you to grant it, instead of silently failing.
+  required for `ClipboardTyper` to inject keystrokes. The menu bar item shows
+  live status ("Accessibility Access: Granted" or "Grant Accessibility
+  Access…" which opens the setting directly). If it's not granted when you
+  press Cmd+Shift+V, pype opens the prompt and notifies you **once** (not on
+  every keypress).
 - **Notifications**: requested on first launch for the truncation/error
   notices. If declined, those notices are silently dropped (logged via
   `os.log` instead) rather than blocking typing.
 - Hotkey *detection* itself (Carbon `RegisterEventHotKey`) needs neither
   permission — same low-friction behavior as Windows for that specific part.
+
+### ⚠️ Accessibility + code signing (read this if typing does nothing)
+
+These builds are **ad-hoc signed, not Developer ID signed or notarized**
+(that needs a paid Apple Developer account). On recent macOS, that has a real
+consequence: **you can enable pype under Privacy & Security > Accessibility,
+the toggle turns on, but `AXIsProcessTrusted()` still returns false and pype
+still can't type** — even after moving it to `/Applications` and relaunching.
+This is a known limitation of unsigned/ad-hoc apps and TCC (macOS's
+permission system), not a pype bug, and it can't be fully fixed in code.
+
+If you hit this, in rough order of effort:
+
+1. Make sure pype is in `/Applications` (not run from the download folder —
+   that triggers a separate translocation issue) and fully quit + reopen it
+   after enabling the toggle.
+2. Try removing and re-adding pype in the Accessibility list (the `–`/`+`
+   buttons), then relaunch.
+3. If it still won't stick, the reliable fix is a **signed + notarized
+   build** — see [Signing](#building) below. That's the only thing that makes
+   TCC trust the app persistently.
+
+The definitive fix is on the roadmap only if pype gets a Developer ID
+certificate; until then this is the honest state of unsigned distribution.
 
 ## Building
 
@@ -104,8 +130,9 @@ LaunchAgent plist file — `SMAppService.mainApp` manages that internally).
 ## Usage
 
 Copy any text to the clipboard, click wherever you want it typed, then press
-**Cmd+Shift+V**. Click the menu bar icon for About, "Run at Login", and
-Quit.
+**Cmd+Shift+V**. Click the menu bar icon for About, the Accessibility status
+/ "Grant Accessibility Access…" item, a "Run at Login" toggle (checkmark when
+active), and Quit.
 
 ## Testing notes
 
@@ -145,3 +172,8 @@ declined). Worth a real test before relying on it.
 - **No update mechanism**: unlike the Windows side (registry
   `DisplayVersion`, RMM-friendly), there's no equivalent "patch" story here
   yet — re-running `build-pkg.sh` and reinstalling is the only path.
+- **Accessibility may not persist on unsigned builds**: because these builds
+  aren't Developer ID signed + notarized, macOS may refuse to actually trust
+  pype for Accessibility even after you enable it — see the
+  [Accessibility + code signing](#️-accessibility--code-signing-read-this-if-typing-does-nothing)
+  section above. This is the single biggest caveat for real-world use.

@@ -2,6 +2,7 @@
 // Copyright (C) 2026 pype contributors
 
 import AppKit
+import ApplicationServices
 
 /// Menu bar item + menu — the macOS equivalent of the Windows tray icon.
 @MainActor
@@ -9,8 +10,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let hotkeyManager = HotkeyManager()
     private let runAtLoginItem = NSMenuItem()
+    private let accessibilityItem = NSMenuItem()
     private let quitItem = NSMenuItem()
     private var isTyping = false
+    // Guards the "needs Accessibility" notification so it fires at most once
+    // per not-granted episode instead of on every hotkey press. Reset to
+    // false whenever trust is observed as granted, so a later loss of the
+    // permission re-notifies.
+    private var hasWarnedNoAccessibility = false
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -35,6 +42,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(aboutItem)
 
         menu.addItem(.separator())
+
+        // Accessibility status/affordance. Its title and action are set live
+        // in menuWillOpen (AXIsProcessTrusted is a fast local call, safe to
+        // query synchronously as the menu opens - unlike the schtasks-backed
+        // Run-at-Login state). Gives the user a persistent, non-spammy way to
+        // see whether pype can actually type and to jump straight to the
+        // setting, instead of relying on a per-keypress notification.
+        accessibilityItem.target = self
+        accessibilityItem.action = #selector(fixAccessibility)
+        menu.addItem(accessibilityItem)
 
         runAtLoginItem.title = "Run at Login"
         runAtLoginItem.action = #selector(toggleRunAtLogin)
@@ -70,10 +87,34 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     // it, since Run at Login can also be changed outside this process (e.g.
     // System Settings > General > Login Items). Also re-applies quitItem's
     // disabled-while-typing state, in case the menu is opened after typing
-    // already started.
+    // already started, and reflects live Accessibility status.
     func menuWillOpen(_ menu: NSMenu) {
         runAtLoginItem.state = AutoStartManager.isEnabled ? .on : .off
         quitItem.isEnabled = !isTyping
+
+        if AXIsProcessTrusted() {
+            accessibilityItem.title = "Accessibility Access: Granted"
+            accessibilityItem.state = .on
+            accessibilityItem.isEnabled = false
+            hasWarnedNoAccessibility = false
+        } else {
+            accessibilityItem.title = "Grant Accessibility Access…"
+            accessibilityItem.state = .off
+            accessibilityItem.isEnabled = true
+        }
+    }
+
+    @objc private func fixAccessibility() {
+        promptForAccessibility()
+    }
+
+    // Opens the system Accessibility prompt and pre-populates pype in the
+    // Privacy & Security > Accessibility list (unchecked, ready to toggle on).
+    // AXIsProcessTrustedWithOptions with the prompt option is the documented
+    // way to do this; without the option it's a silent status check.
+    private func promptForAccessibility() {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
     }
 
     @objc private func toggleRunAtLogin() {
@@ -142,6 +183,30 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             return
         }
 
+        // Check Accessibility BEFORE the truncation notice: otherwise an
+        // ungranted user sees "only the first 128 were typed" (past tense,
+        // implying success) followed by "permission required" - contradictory,
+        // and nothing was actually typed. AXIsProcessTrusted() is a fast local
+        // call, so gating on it up front costs nothing.
+        guard AXIsProcessTrusted() else {
+            // Notify at most once per not-granted episode - firing on every
+            // keypress is exactly the "constant" barrage we want to avoid.
+            // Also open the system prompt (once) so the fix is one click away;
+            // the menu's "Grant Accessibility Access…" item is the persistent
+            // path. hasWarnedNoAccessibility resets once trust is regained
+            // (below and in menuWillOpen), so a later loss re-notifies.
+            if !hasWarnedNoAccessibility {
+                hasWarnedNoAccessibility = true
+                promptForAccessibility()
+                NotificationManager.show(
+                    title: "pype",
+                    body: "Accessibility permission is required to type. Enable pype under System Settings > Privacy & Security > Accessibility (opened for you). If it's already enabled, quit and reopen pype."
+                )
+            }
+            return
+        }
+        hasWarnedNoAccessibility = false
+
         let truncated = text.count > AppInfo.maxTypeLength
         // Character-based truncation (Swift's default String semantics) never
         // splits an extended grapheme cluster, unlike a raw UTF-16 code-unit
@@ -158,14 +223,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 title: "pype - text truncated",
                 body: "Clipboard held \(text.count) characters; only the first \(toType.count) were typed."
             )
-        }
-
-        if !AXIsProcessTrusted() {
-            NotificationManager.show(
-                title: "pype",
-                body: "Accessibility permission is required to type. Grant it in System Settings > Privacy & Security > Accessibility, then try again."
-            )
-            return
         }
 
         await ClipboardTyper.type(toType)

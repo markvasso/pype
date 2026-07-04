@@ -12,10 +12,12 @@
          if you have one before distributing this outside your own machine. -->
     <key>CFBundleIdentifier</key>
     <string>com.pype.app</string>
+    <!-- Keep in sync with <Version> in ../windows/src/Pype.csproj and
+         PRODUCT_VERSION in ../windows/installer/PypeSetup.nsi on each release. -->
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>1.0.1</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>1.0.1</string>
     <key>CFBundleExecutable</key>
     <string>pype</string>
     <key>CFBundleIconFile</key>
