@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>pype</AssemblyName>
+    <RootNamespace>Pype</RootNamespace>
+    <Product>pype</Product>
+    <Company>pype</Company>
+    <AssemblyTitle>pype - Clipboard Typer</AssemblyTitle>
+    <ApplicationIcon>pype.ico</ApplicationIcon>
+
+    <!-- Single source of truth for the version: bump this and republish. The
+         installer reads the built exe's own FileVersionInfo at install time
+         (not this file) to populate the registry DisplayVersion, so what's
+         registered always matches what's actually on disk. -->
+    <Version>1.0.0</Version>
+
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Lets `dotnet build`/`publish` resolve Windows reference assemblies from a
+         non-Windows host (e.g. CI, or authoring on macOS/Linux). Only affects
+         which SDK to build against; the output is still Windows-only. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+
+    <!--
+      RuntimeIdentifier/SelfContained are intentionally NOT set here so a plain
+      `dotnet build` never requires the win-x64 runtime packs to be restored.
+      Pass them on the command line when publishing, see README.md.
+    -->
+  </PropertyGroup>
+
+  <!-- No .pdb for Release/published builds: by default the compiler embeds the
+       absolute local build path (e.g. /Users/<you>/... or C:\Users\<you>\...)
+       both as a reference inside the exe and as source-file paths inside the
+       .pdb itself. Since this repo ships a pre-built installer/pype.exe,
+       that would otherwise leak whoever built it's OS username and folder
+       layout into a public binary. Debug builds still get full symbols. -->
+  <PropertyGroup Condition="'$(Configuration)'=='Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
+</Project>

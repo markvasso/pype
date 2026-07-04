@@ -1,0 +1,25 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 pype contributors
+#
+# Runs after pkgbuild's component install places pype.app in /Applications.
+# Best-effort only: none of this failing should fail the overall install.
+
+# If an older pype is already running, replacing the app bundle's files
+# doesn't stop it (Unix lets you replace a file a process still has open) -
+# stop it explicitly so the relaunch below picks up the new version instead
+# of leaving a stale one running until the next manual restart.
+pkill -f "/Applications/pype.app/Contents/MacOS/pype" 2>/dev/null || true
+sleep 1
+
+# Launch as the actual logged-in user, not root (postinstall scripts run as
+# root during a `sudo installer` / GUI Installer.app run). /dev/console
+# reports "loginwindow" (not a real user) when installed at the login
+# screen before anyone signs in, e.g. via remote/unattended provisioning -
+# skip launching in that case rather than trying to sudo -u a system account.
+CONSOLE_USER=$(stat -f%Su /dev/console)
+if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ] && [ "$CONSOLE_USER" != "loginwindow" ]; then
+    sudo -u "$CONSOLE_USER" open -a /Applications/pype.app || true
+fi
+
+exit 0

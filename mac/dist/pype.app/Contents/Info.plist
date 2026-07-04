@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 pype contributors -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>pype</string>
+    <key>CFBundleDisplayName</key>
+    <string>pype</string>
+    <!-- Placeholder reverse-DNS identifier; change this to your own domain
+         if you have one before distributing this outside your own machine. -->
+    <key>CFBundleIdentifier</key>
+    <string>com.pype.app</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleExecutable</key>
+    <string>pype</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <!-- Menu-bar-only app: no Dock icon, no main window. AppDelegate also
+         sets NSApp.activationPolicy = .accessory at launch; this Info.plist
+         key acts earlier, before that code runs, avoiding a brief Dock-icon
+         flash on launch. -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright (C) 2026 pype contributors. Licensed under the GNU GPL v3.0 or later.</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>
