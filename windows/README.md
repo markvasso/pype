@@ -17,15 +17,18 @@ in Session 0 and, since Windows Vista, cannot register global hotkeys, read
 the interactive user's clipboard reliably, inject keystrokes into foreground
 apps, or show notifications — all of that requires running inside the user's
 own desktop session. So pype is a small background app (tray icon, no main
-window) that's registered to start automatically at logon via the standard
-"Run" registry key (the same one Task Manager's Startup tab manages).
-Functionally it behaves like a service — always running, nothing to manually
-launch — it's just not registered with the Service Control Manager.
+window). Turn on **Run at Login** from its tray menu and it starts
+automatically at logon (via the standard "Run" registry key, visible in Task
+Manager's Startup tab) — functionally like a service, always running with
+nothing to manually launch, just not registered with the Service Control
+Manager.
 
 ## How it works
 
 - `RegisterHotKey` (Win32) registers Ctrl+Shift+V against a hidden
-  message-only window — no taskbar/Alt+Tab presence.
+  message-only window — no taskbar/Alt+Tab presence. The same typing action
+  is also available as **"Type clipboard"** in the tray right-click menu (it
+  waits ~350ms for focus to return to your target window before typing).
 - On trigger, it reads clipboard text (`Clipboard.GetText`, with retry since
   the clipboard is a shared OS resource other apps can transiently hold).
 - Text is typed via `SendInput` using `KEYEVENTF_UNICODE`, which sends raw
@@ -40,19 +43,23 @@ launch — it's just not registered with the Service Control Manager.
   a UTF-16 surrogate pair across the boundary), and a non-blocking tray
   balloon notification explains the truncation while typing proceeds
   immediately.
-- **Autostart** uses the standard `Run` registry key (`HKCU\...\Run` per-user,
-  `HKLM\...\Run` machine-wide) — deliberately *not* a Scheduled Task, so it's
-  visible and toggleable in **Task Manager's Startup tab** where users expect
-  it. The installer writes the same key the tray "Run at Login" item does, so
-  there's one source of truth; the tray shows a checkmark when it's active.
-  The tray toggle manages the per-user (HKCU) entry, so if pype was pushed
-  machine-wide (HKLM) by an RMM tool, a standard user's toggle won't remove
-  that entry — correct behavior for IT-managed autostart.
-- **On launch** pype checks the GitHub releases API once for a newer version
-  and, if found, shows a popup linking to the downloads page. This is the
-  only network request pype makes and sends no data beyond a normal API call;
-  it fails silently offline.
+- **Autostart** is controlled from the tray menu's **"Run at Login"** toggle
+  (installed edition only), which writes the per-user `Run` registry key
+  (`HKCU\...\Run`) — visible and toggleable in **Task Manager's Startup tab**.
+  It's *not* a Scheduled Task, and the **installer does not enable it** (older
+  installers did, which could leave two startup entries and launch pype
+  twice). The tray shows a checkmark when it's active.
+- **On launch** the installed edition checks the GitHub releases API once for
+  a newer version and, if found, shows a popup linking to the downloads page.
+  This is the only network request pype makes and sends no data beyond a
+  normal API call; it fails silently offline. It can be turned off via the
+  tray menu's **"Check for updates on startup"** toggle.
 - **About** (tray menu) links to the project's GitHub page.
+- **Portable vs installed**: the same `pype.exe` runs either way. Run on its
+  own it's *portable* — just the hotkey, "Type clipboard", About, and Exit.
+  Placed by the installer (which drops a marker file next to it), it's the
+  *installed* edition and additionally shows Run at Login and the update
+  check. Portable pype never touches autostart or the network.
 
 ## SmartScreen / antivirus warnings
 
@@ -142,24 +149,24 @@ installer\install.cmd /S
 installer\install.cmd /S /ALLUSERS
 ```
 
-This first cleans up any prior install (including the Scheduled Task older
-versions used for autostart) for a clean environment — preserving your
-autostart on/off preference — then copies `pype.exe` (and a copy of
-`Uninstall-Pype.ps1`, so the registered uninstall command keeps working even
-if the original install source is later deleted), enables autostart via the
-`Run` registry key (visible in Task Manager > Startup), creates Start Menu
-shortcuts (`pype` to launch it, `Uninstall pype` to remove it — in
-`%ProgramData%\...\Start Menu` or `%APPDATA%\...\Start Menu` depending on
-scope), writes the registry Uninstall key described below, and starts pype
-immediately. Useful extra switches (pass to the `.ps1` directly, or as extra
+This first cleans up any prior install (including the machine-side autostart
+and the legacy Scheduled Task older versions used) for a clean environment,
+then copies `pype.exe` (and a copy of `Uninstall-Pype.ps1`, so the registered
+uninstall command keeps working even if the original install source is later
+deleted), drops the `pype.installed` marker (so the app knows it's the
+installed edition), creates Start Menu shortcuts (`pype` to launch it,
+`Uninstall pype` to remove it — in `%ProgramData%\...\Start Menu` or
+`%APPDATA%\...\Start Menu` depending on scope), writes the registry Uninstall
+key described below, and starts pype immediately. **The installer no longer
+enables autostart** — turn on Run at Login from pype's tray menu if you want
+it. Useful extra switches (pass to the `.ps1` directly, or as extra
 passthrough args to the `.cmd`, after any silent/scope switch):
 
 | Switch | Effect |
 |---|---|
-| `-SystemWide` | Install for all users instead of just you — `%ProgramFiles%\pype`, `HKLM`, starts for whichever user logs on. Requires an elevated session. Shorthand for `-Scope Machine`; the `.cmd` wrapper's `/ALLUSERS` maps to this. |
+| `-SystemWide` | Install for all users instead of just you — `%ProgramFiles%\pype`, `HKLM` registration. Requires an elevated session. Shorthand for `-Scope Machine`; the `.cmd` wrapper's `/ALLUSERS` maps to this. |
 | `-Scope Machine\|User\|Auto` | Force a scope instead of auto-detecting |
-| `-InstallDir <path>` | Install somewhere other than the scope's default. For a **machine-wide** install this must be an admin-only location (under `%ProgramFiles%` or `%WINDIR%`) — the installer refuses a user-writable path, since the all-users autostart would otherwise let a standard user swap `pype.exe` and run code in other users' sessions. Per-user installs have no such restriction. |
-| `-NoAutoStart` | Don't enable autostart. On a reinstall this always wins; otherwise a reinstall keeps the prior autostart choice. |
+| `-InstallDir <path>` | Install somewhere other than the scope's default. For a **machine-wide** install this must be an admin-only location (under `%ProgramFiles%` or `%WINDIR%`) — the installer refuses a user-writable path, since a shared all-users exe there could be swapped by a standard user for code that other users then run. Per-user installs have no such restriction. |
 | `-NoStartNow` | Don't launch pype immediately after installing |
 | `-NoStartMenuShortcut` | Don't create the Start Menu shortcuts |
 
@@ -211,10 +218,10 @@ not two kept in sync by hand. The wizard adds:
   the process ends up elevated, and `Install-Pype.ps1`'s own `-Scope Auto`
   detection then does the right thing based on that, same composition as the
   CLI installer.
-- A components checkbox: "Start pype at login" (checked by default, maps to
-  `-NoAutoStart` when unchecked). Start Menu shortcuts are always created by
-  `Install-Pype.ps1` regardless.
 - A "Launch pype now" option on the Finish page.
+
+(There's no "start at login" option — autostart is turned on from pype's tray
+menu after install, not by the installer.)
 
 It deliberately does **not** register its own Add/Remove Programs entry (no
 `WriteUninstaller` call in the script — NSIS warns about this at compile
@@ -280,18 +287,19 @@ hardcoded in the install script. To ship a patch:
    `installer/`.
 3. Push `installer\install.cmd /S` (or `Install-Pype.ps1 -Silent`) through
    your RMM the same way you did the original install — it cleans the prior
-   install, overwrites the exe, re-applies autostart, and updates
-   `DisplayVersion` to match. The install is idempotent, so re-running it is
-   the patch mechanism; there's no separate "update" script. (The app also
-   self-notifies about new releases on launch, but that's a user-facing nudge,
-   not a substitute for pushing the update.)
+   install, overwrites the exe, and updates `DisplayVersion` to match. The
+   install is idempotent, so re-running it is the patch mechanism; there's no
+   separate "update" script. (The app also self-notifies about new releases on
+   launch, but that's a user-facing nudge, not a substitute for pushing the
+   update.)
 
 RMM agents almost universally execute deployment scripts as `SYSTEM`, which
 `Test-IsAdmin` in the installer resolves to `Machine` scope automatically —
-no special flags needed for a typical RMM push. One thing to note: a
-`Machine`-scope install writes autostart to `HKLM\...\Run`, which starts pype
-for whichever user logs on — the right behavior for a machine that `SYSTEM`
-provisioned for all users.
+no special flags needed for a typical RMM push. Note that autostart is no
+longer part of the install (it's a per-user tray choice), so a machine-wide
+push installs and registers pype for all users but leaves "Run at Login" for
+each user to enable — if you need every user's pype to autostart, set the
+`HKLM\...\Run\pype` value yourself as part of your deployment.
 
 ## Usage
 

@@ -26,21 +26,25 @@ manager — one hotkey, one job.
 
 ## Features
 
-- Global hotkey types the clipboard's text content into whatever has focus.
+- Global hotkey types the clipboard's text content into whatever has focus —
+  or a **"Type clipboard"** item in the tray/menu-bar menu for the same thing.
 - 128-character cap with a notification explaining the truncation, so a
   huge or unexpected clipboard contents never silently dumps somewhere.
 - Typing is paced (fast, but visible), not an instant flash — a clear signal
   it's pype doing the typing.
-- Tray icon (Windows) / menu bar item (macOS) with About (links to GitHub),
-  a Run at Login toggle, and Exit/Quit. macOS additionally shows live
+- Tray icon (Windows) / menu bar item (macOS) with About (links to GitHub) and
+  Exit/Quit. The installed edition also has a **Run at Login** toggle and a
+  **Check for updates on startup** toggle; macOS additionally shows live
   Accessibility-permission status and a one-click way to open the setting.
-- Run at Login that's visible where users expect it — Task Manager's Startup
-  tab on Windows (a `Run` key entry), Login Items on macOS (`SMAppService`).
-- Checks GitHub on launch for a newer release and points you to the download
-  if there is one. This is the only network call pype makes.
+- Run at Login (when you enable it) is visible where users expect it — Task
+  Manager's Startup tab on Windows (a `Run` key entry), Login Items on macOS
+  (`SMAppService`). Installers don't force it on.
+- The installed edition checks GitHub on launch for a newer release and points
+  you to the download if there is one (toggleable). This is the only network
+  call pype makes. The portable Windows exe never does this.
 - Installers with silent switches for unattended/scripted deployment:
   PowerShell + NSIS GUI installer on Windows, `.pkg` on macOS. Re-running an
-  installer cleans the prior version first and keeps your autostart choice.
+  installer cleans the prior version first.
 - Windows: registers in the standard Programs-and-Features registry
   location with a real version number, so RMM/patch-management tooling can
   see and manage it like any other installed app.

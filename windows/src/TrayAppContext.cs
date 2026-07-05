@@ -8,10 +8,19 @@ namespace Pype;
 
 internal sealed class TrayAppContext : ApplicationContext
 {
+    // When the user triggers typing from the tray menu (rather than the
+    // hotkey), give focus a moment to return to the target window after the
+    // menu closes before injecting keystrokes - otherwise the first few could
+    // land in the wrong place. The hotkey path needs no delay (the target
+    // already has focus).
+    private const int MenuTypeFocusDelayMs = 350;
+
     private readonly NotifyIcon _trayIcon;
     private readonly HotkeyWindow _hotkeyWindow;
-    private readonly ToolStripMenuItem _runAtLoginItem;
     private readonly ToolStripMenuItem _exitItem;
+    // Installed-edition-only items (null in portable mode).
+    private readonly ToolStripMenuItem? _runAtLoginItem;
+    private readonly ToolStripMenuItem? _updateCheckItem;
     private System.Drawing.Icon? _ownedIcon;
     private bool _isTyping;
 
@@ -31,23 +40,37 @@ internal sealed class TrayAppContext : ApplicationContext
             Visible = true
         };
 
-        _runAtLoginItem = new ToolStripMenuItem("Run at Login", null, (_, _) => ToggleRunAtLogin());
         _exitItem = new ToolStripMenuItem("Exit", null, (_, _) => ExitApp());
 
         var menu = new ContextMenuStrip();
-        menu.Items.Add("About pype", null, (_, _) => ShowAbout());
+        // Primary action first: type the clipboard, same as the hotkey.
+        menu.Items.Add("Type clipboard", null, async (_, _) => await TypeClipboardAsync(fromMenu: true));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(_runAtLoginItem);
+        menu.Items.Add("About pype", null, (_, _) => ShowAbout());
+
+        // Run at Login and the update-check toggle are install-only: a portable
+        // pype.exe doesn't manage autostart or check for updates.
+        if (AppMode.IsInstalled)
+        {
+            _runAtLoginItem = new ToolStripMenuItem("Run at Login", null, (_, _) => ToggleRunAtLogin());
+            _updateCheckItem = new ToolStripMenuItem("Check for updates on startup", null, (_, _) => ToggleUpdateCheck());
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(_runAtLoginItem);
+            menu.Items.Add(_updateCheckItem);
+        }
+
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_exitItem);
+
         // Apply state synchronously as the menu opens so it's correct on the
-        // first (and every) open. AutoStartManager now reads the Run registry
-        // key directly - a fast, synchronous local call - so unlike the old
-        // schtasks-based approach there's no round-trip to hide behind a cache.
+        // first (and every) open. AutoStartManager reads the Run registry key
+        // directly - a fast, synchronous local call - so there's no round-trip
+        // to hide behind a cache.
         menu.Opening += (_, _) =>
         {
             _exitItem.Enabled = !_isTyping;
-            _runAtLoginItem.Checked = AutoStartManager.IsEnabled();
+            if (_runAtLoginItem is not null) _runAtLoginItem.Checked = AutoStartManager.IsEnabled();
+            if (_updateCheckItem is not null) _updateCheckItem.Checked = Settings.CheckForUpdatesOnStartup;
         };
         _trayIcon.ContextMenuStrip = menu;
 
@@ -67,12 +90,16 @@ internal sealed class TrayAppContext : ApplicationContext
             _trayIcon.ShowBalloonTip(5000, "pype", ex.Message, ToolTipIcon.Error);
         }
 
-        // Run the update check once, after the message loop is actually up.
-        // Doing it here in the constructor would start the async work before
-        // Application.Run installs the WinForms SynchronizationContext, so the
-        // continuation (which shows UI) could resume off the UI thread.
-        // Application.Idle first fires once the loop is running.
-        Application.Idle += OnFirstIdle;
+        // Update check: installed edition only, and only if the user hasn't
+        // turned it off. Run once the message loop is actually up - starting
+        // the async work in the constructor would run before Application.Run
+        // installs the WinForms SynchronizationContext, so the continuation
+        // (which shows UI) could resume off the UI thread. Application.Idle
+        // first fires once the loop is running.
+        if (AppMode.IsInstalled && Settings.CheckForUpdatesOnStartup)
+        {
+            Application.Idle += OnFirstIdle;
+        }
     }
 
     private void OnFirstIdle(object? sender, EventArgs e)
@@ -81,27 +108,31 @@ internal sealed class TrayAppContext : ApplicationContext
         _ = CheckForUpdatesAsync();
     }
 
-    private async void OnHotkeyPressed()
+    private async void OnHotkeyPressed() => await TypeClipboardAsync(fromMenu: false);
+
+    private async Task TypeClipboardAsync(bool fromMenu)
     {
-        // Typing is now paced over real time (see AppInfo.TypingIntervalMs) -
-        // up to ~1.3s for the full 128 characters - instead of one
-        // instantaneous batch, so there's a real window for the hotkey to
-        // fire again before the previous run finishes. Without this guard,
-        // two overlapping TypeAsync calls would interleave their keystrokes
-        // into garbled output.
+        // Typing is paced over real time (see AppInfo.TypingIntervalMs) - up to
+        // ~1.3s for the full 128 characters - instead of one instantaneous
+        // batch, so there's a real window for another trigger to arrive before
+        // this run finishes. Without this guard two overlapping runs would
+        // interleave their keystrokes into garbled output.
         if (_isTyping) return;
         _isTyping = true;
         // Also disable Exit for that same window: without this, choosing Exit
-        // mid-type disposes _hotkeyWindow/_trayIcon and stops the message
-        // pump, silently abandoning the rest of TypeAsync's paced loop (its
-        // queued continuation never gets to run) - not a crash, just
-        // unnoticed truncated output. A single instantaneous SendInput batch
-        // never had a large enough window for this to matter; the paced
-        // version does.
+        // mid-type disposes _hotkeyWindow/_trayIcon and stops the message pump,
+        // silently abandoning the rest of the paced loop.
         _exitItem.Enabled = false;
 
         try
         {
+            // Triggered from the menu: let focus return to the target window
+            // after the menu closes before we start injecting keystrokes.
+            if (fromMenu)
+            {
+                await Task.Delay(MenuTypeFocusDelayMs);
+            }
+
             string text;
             try
             {
@@ -224,15 +255,32 @@ internal sealed class TrayAppContext : ApplicationContext
         }
 
         // Reflect what actually happened rather than assuming.
-        _runAtLoginItem.Checked = AutoStartManager.IsEnabled();
+        if (_runAtLoginItem is not null) _runAtLoginItem.Checked = AutoStartManager.IsEnabled();
+    }
+
+    private void ToggleUpdateCheck()
+    {
+        try
+        {
+            Settings.CheckForUpdatesOnStartup = !Settings.CheckForUpdatesOnStartup;
+        }
+        catch (Exception ex)
+        {
+            // Persisting the setting writes to HKCU; on a locked-down profile
+            // that could throw. Degrade to a balloon like the Run-at-Login
+            // toggle rather than escaping to the global crash dialog.
+            _trayIcon.ShowBalloonTip(4000, "pype", $"Could not save the update-check setting: {ex.Message}", ToolTipIcon.Error);
+        }
+        if (_updateCheckItem is not null) _updateCheckItem.Checked = Settings.CheckForUpdatesOnStartup;
     }
 
     private void ShowAbout()
     {
         ShowInfoWithLink(
             caption: "About pype",
-            heading: AppInfo.DisplayName,
-            body: "Press Ctrl+Shift+V anywhere to type the clipboard's text content.\n" +
+            heading: $"{AppInfo.DisplayName} {UpdateChecker.LocalVersionString}",
+            body: "Press Ctrl+Shift+V anywhere (or use \"Type clipboard\" in this menu) to\n" +
+                  "type the clipboard's text content. " +
                   $"Text over {AppInfo.MaxTypeLength} characters is truncated.",
             url: AppInfo.RepoUrl);
     }

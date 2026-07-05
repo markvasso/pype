@@ -42,29 +42,27 @@ one-time user consent — there's no way around this, unlike Windows:
 - Hotkey *detection* itself (Carbon `RegisterEventHotKey`) needs neither
   permission — same low-friction behavior as Windows for that specific part.
 
-### ⚠️ Accessibility + code signing (read this if typing does nothing)
+### Accessibility and code signing (affects updates)
 
 These builds are **ad-hoc signed, not Developer ID signed or notarized**
-(that needs a paid Apple Developer account). On recent macOS, that has a real
-consequence: **you can enable pype under Privacy & Security > Accessibility,
-the toggle turns on, but `AXIsProcessTrusted()` still returns false and pype
-still can't type** — even after moving it to `/Applications` and relaunching.
-This is a known limitation of unsigned/ad-hoc apps and TCC (macOS's
-permission system), not a pype bug, and it can't be fully fixed in code.
+(that needs a paid Apple Developer account). macOS ties an Accessibility grant
+to the app's code identity, and an ad-hoc build's identity **changes every
+time the binary changes**. Two real consequences:
 
-If you hit this, in rough order of effort:
+- **On first grant** you may find that enabling pype under Privacy & Security
+  > Accessibility doesn't take effect until you quit and reopen pype.
+- **On every update**, because the new build has a different identity, the old
+  grant no longer applies: pype shows up already-checked in the Accessibility
+  list but still can't type. You have to **remove pype from the list (`–`) and
+  re-add it (`+`) / re-toggle it**, then relaunch.
 
-1. Make sure pype is in `/Applications` (not run from the download folder —
-   that triggers a separate translocation issue) and fully quit + reopen it
-   after enabling the toggle.
-2. Try removing and re-adding pype in the Accessibility list (the `–`/`+`
-   buttons), then relaunch.
-3. If it still won't stick, the reliable fix is a **signed + notarized
-   build** — see [Signing](#building) below. That's the only thing that makes
-   TCC trust the app persistently.
-
-The definitive fix is on the roadmap only if pype gets a Developer ID
-certificate; until then this is the honest state of unsigned distribution.
+This is a limitation of unsigned/ad-hoc apps and TCC (macOS's permission
+system), not a pype bug, and it can't be fixed in code. It's exactly why there
+is **no "portable" macOS download** — only the `.pkg`, which at least installs
+to a stable location. The one real fix is a **Developer ID signed + notarized
+build** (see [Signing](#building)); the app's identity would then be stable
+across versions and the grant would persist. Until pype has a certificate,
+expect to re-grant Accessibility after each update.
 
 ## Building
 
@@ -77,10 +75,11 @@ cd mac
 ./installer/build-pkg.sh   # produces dist/pype.app AND dist/PypeInstaller.pkg
 ```
 
-A pre-built `dist/pype.app` and `dist/PypeInstaller.pkg` are already included
-in this repo (ad-hoc signed, tiny — Swift dynamically links the system
-frameworks rather than bundling a runtime, so there's no equivalent of the
-Windows self-contained-publish size).
+A pre-built `dist/PypeInstaller.pkg` is already included in this repo (ad-hoc
+signed, tiny — Swift dynamically links the system frameworks rather than
+bundling a runtime, so there's no equivalent of the Windows
+self-contained-publish size). The loose `.app` is a build artifact and isn't
+committed; `build-app.sh`/`build-pkg.sh` regenerate it.
 
 Release builds pass `-Xswiftc -gnone` to the compiler deliberately: by
 default Swift embeds the absolute local build path in the binary's DWARF
@@ -105,13 +104,17 @@ open dist/PypeInstaller.pkg              # interactive
 sudo installer -pkg dist/PypeInstaller.pkg -target /   # silent
 ```
 
-Installs to `/Applications/pype.app`. The `postinstall` script stops any
-already-running pype (so a re-run/upgrade doesn't leave a stale instance
-running) and relaunches the new one as the logged-in console user (the
-script itself runs as root under `sudo installer`).
+Installs to `/Applications/pype.app`. A `preinstall` script removes any prior
+copy for a clean install; the `postinstall` script stops any already-running
+pype and relaunches the new one as the logged-in console user (the scripts
+run as root under `sudo installer`).
 
-Or just drag `pype.app` to `/Applications` yourself — the `.pkg` is a
-convenience, not a requirement.
+The `.pkg` is the **only** macOS download — there's intentionally no loose
+`.app`/zip "portable" build, because the [Accessibility-on-update
+issue](#accessibility-and-code-signing-affects-updates) makes an
+unsigned drag-install especially confusing. The `.pkg` installs to a stable
+location and cleans up prior copies. (If you're building from source you can
+of course run the `.app` from `dist/` directly.)
 
 ## Uninstalling
 
@@ -130,9 +133,11 @@ LaunchAgent plist file — `SMAppService.mainApp` manages that internally).
 ## Usage
 
 Copy any text to the clipboard, click wherever you want it typed, then press
-**Cmd+Shift+V**. Click the menu bar icon for About (which links to the GitHub
-page), the Accessibility status / "Grant Accessibility Access…" item, a "Run
-at Login" toggle (checkmark when active), and Quit.
+**Cmd+Shift+V** — or use **Type Clipboard** in the menu bar menu (it waits a
+moment for focus to return to your target window). The menu also has About
+(which links to the GitHub page), the Accessibility status / "Grant
+Accessibility Access…" item, a "Run at Login" toggle (checkmark when active),
+a "Check for updates on startup" toggle, and Quit.
 
 ## Update check
 
@@ -182,5 +187,5 @@ declined). Worth a real test before relying on it.
 - **Accessibility may not persist on unsigned builds**: because these builds
   aren't Developer ID signed + notarized, macOS may refuse to actually trust
   pype for Accessibility even after you enable it — see the
-  [Accessibility + code signing](#️-accessibility--code-signing-read-this-if-typing-does-nothing)
+  [Accessibility + code signing](#accessibility-and-code-signing-affects-updates)
   section above. This is the single biggest caveat for real-world use.

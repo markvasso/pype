@@ -9,17 +9,20 @@
 
 .DESCRIPTION
     Copies pype.exe (and a copy of Uninstall-Pype.ps1, so the registered
-    uninstall command keeps working later) into an install directory,
-    enables autostart via the standard "Run" registry key (visible and
-    toggleable in Task Manager's Startup tab), and writes a standard Uninstall
-    registry key (DisplayName/DisplayVersion/UninstallString/etc.) under either
-    HKLM or HKCU.
+    uninstall command keeps working later) into an install directory, and
+    writes a standard Uninstall registry key (DisplayName/DisplayVersion/
+    UninstallString/etc.) under either HKLM or HKCU.
 
-    Re-running this script (e.g. to push a newer pype.exe) first cleans up any
-    prior install - including the Scheduled Task older versions used for
-    autostart - for a fresh environment, while preserving the user's autostart
-    on/off preference. It then updates the registry DisplayVersion to match
-    whatever version is actually on disk.
+    Autostart is NOT set up by the installer - it's controlled from pype's tray
+    menu ("Run at Login"). Older versions enabled autostart from the installer,
+    which could leave two startup entries (a machine HKLM entry plus the user's
+    tray HKCU entry) and launch pype twice; installing over such a version
+    removes the machine-side autostart and the legacy Scheduled Task, leaving
+    only the user's own per-user choice.
+
+    Re-running this script (e.g. to push a newer pype.exe) cleans up any prior
+    install for a fresh environment and updates the registry DisplayVersion to
+    match whatever version is actually on disk.
 
 .PARAMETER Silent
     Suppresses console output (still writes to the log file) and never prompts.
@@ -41,10 +44,6 @@
 .PARAMETER InstallDir
     Where to copy pype.exe. Defaults to "$env:ProgramFiles\pype" (Machine
     scope) or "$env:LOCALAPPDATA\pype" (User scope).
-
-.PARAMETER NoAutoStart
-    Skips enabling autostart (the Run registry key). On a reinstall this
-    always wins; otherwise a reinstall preserves the prior autostart choice.
 
 .PARAMETER NoStartNow
     Skips launching pype immediately after install.
@@ -68,7 +67,6 @@ param(
     [string]$Scope = 'Auto',
     [switch]$SystemWide,
     [string]$InstallDir,
-    [switch]$NoAutoStart,
     [switch]$NoStartNow,
     [switch]$NoStartMenuShortcut
 )
@@ -119,20 +117,6 @@ function Get-StartupApprovedPath {
     param([string]$ScopeName)
     $root = if ($ScopeName -eq 'Machine') { 'HKLM:' } else { 'HKCU:' }
     "$root\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
-}
-
-function Test-AutoStartEnabled {
-    # Mirrors the app's AutoStartManager.IsEnabled for one scope: the Run value
-    # must exist AND not be marked disabled in Task Manager's Startup tab
-    # (StartupApproved, leading byte's low bit set = disabled).
-    param([string]$ScopeName)
-    $runVal = (Get-ItemProperty -LiteralPath (Get-RunKeyPath -ScopeName $ScopeName) -Name 'pype' -ErrorAction SilentlyContinue).pype
-    if (-not $runVal) { return $false }
-    $approved = (Get-ItemProperty -LiteralPath (Get-StartupApprovedPath -ScopeName $ScopeName) -Name 'pype' -ErrorAction SilentlyContinue).pype
-    if ($approved -is [byte[]] -and $approved.Length -gt 0 -and ($approved[0] -band 1) -ne 0) {
-        return $false
-    }
-    return $true
 }
 
 function Set-UninstallRegistryKey {
@@ -232,30 +216,6 @@ try {
     } else {
         'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\pype'
     }
-    $runKeyPath = Get-RunKeyPath -ScopeName $resolvedScope
-
-    # Capture the prior autostart preference BEFORE cleaning anything, so a
-    # reinstall preserves the user's on/off choice ("user preferences can
-    # stay"). Autostart is pype's only persistent preference. Both scopes are
-    # checked (not just the one being installed now) so changing scope on a
-    # reinstall still inherits the prior choice rather than defaulting to on.
-    $priorInstall = (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\pype') -or
-                    (Test-Path -LiteralPath 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\pype')
-    # Test-AutoStartEnabled honors Task Manager's disable record, so a user who
-    # turned pype off in the Startup tab is correctly seen as "autostart off"
-    # and a reinstall won't silently re-enable it.
-    $priorAutoStart = (Test-AutoStartEnabled -ScopeName 'User') -or (Test-AutoStartEnabled -ScopeName 'Machine')
-    # Older pype versions used a Scheduled Task for autostart; treat an
-    # existing, non-disabled one as "autostart was on" so upgrading from those
-    # versions doesn't silently turn it off.
-    $legacyTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    if ($legacyTask -and $legacyTask.State -ne 'Disabled') { $priorAutoStart = $true }
-
-    # Fresh install defaults to autostart on; a reinstall preserves the prior
-    # choice; -NoAutoStart always wins.
-    $enableAutoStart = if ($NoAutoStart) { $false }
-                       elseif ($priorInstall) { $priorAutoStart }
-                       else { $true }
 
     Write-PypeLog "Installing pype (scope: $resolvedScope) to $InstallDir"
 
@@ -273,9 +233,20 @@ try {
     Start-Sleep -Milliseconds 300
 
     # --- Clean any prior install so the new one lands in a fresh environment.
-    #     The autostart preference captured above is re-applied below.
     # Remove the legacy Scheduled Task older versions used for autostart.
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+
+    # Remove the MACHINE (HKLM) autostart entry. The installer no longer sets up
+    # autostart at all (it's controlled from pype's tray menu now); older
+    # versions wrote an HKLM Run entry for machine installs, which combined with
+    # a user's own tray (HKCU) entry could start pype twice at logon. Clearing
+    # HKLM leaves only the user's per-user choice. HKCU is deliberately left
+    # alone so a reinstall preserves the user's own "Run at Login" preference.
+    foreach ($p in @((Get-RunKeyPath -ScopeName 'Machine'), (Get-StartupApprovedPath -ScopeName 'Machine'))) {
+        if (Test-Path -LiteralPath $p) {
+            Remove-ItemProperty -LiteralPath $p -Name 'pype' -Force -ErrorAction SilentlyContinue
+        }
+    }
 
     # If a prior install (either scope) registered a DIFFERENT location, remove
     # its pype files so a stale copy isn't left behind. Only touch it if
@@ -297,22 +268,15 @@ try {
         }
     }
 
-    # Remove the OTHER scope's autostart Run entry so a scope-changing reinstall
-    # doesn't leave a redundant/stale one behind (best-effort; removing HKLM
-    # needs elevation, which a User-scope reinstall may lack).
-    $otherScope = if ($resolvedScope -eq 'Machine') { 'User' } else { 'Machine' }
-    foreach ($p in @((Get-RunKeyPath -ScopeName $otherScope), (Get-StartupApprovedPath -ScopeName $otherScope))) {
-        if (Test-Path -LiteralPath $p) {
-            Remove-ItemProperty -LiteralPath $p -Name 'pype' -Force -ErrorAction SilentlyContinue
-        }
-    }
-
     $destExe = Join-Path $InstallDir 'pype.exe'
     $destUninstallScript = Join-Path $InstallDir 'Uninstall-Pype.ps1'
     Copy-Item -LiteralPath $sourceExe -Destination $destExe -Force
     # Copied so the UninstallString registered below still resolves even if the
     # original install source (e.g. an RMM staging folder) is later cleaned up.
     Copy-Item -LiteralPath $sourceUninstallScript -Destination $destUninstallScript -Force
+    # Marker that tells the running pype.exe it's the installed edition (vs a
+    # standalone portable exe), so it shows the install-only menu items.
+    Set-Content -LiteralPath (Join-Path $InstallDir 'pype.installed') -Value '' -Force
     Write-PypeLog "Copied pype.exe and Uninstall-Pype.ps1 to $InstallDir"
 
     $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($destExe)
@@ -320,29 +284,6 @@ try {
                        elseif ($versionInfo.FileVersion) { $versionInfo.FileVersion.Trim() }
                        else { '0.0.0.0' }
     Write-PypeLog "Detected pype.exe version: $displayVersion"
-
-    # Autostart via the standard "Run" registry key rather than a Scheduled
-    # Task, so it shows up in - and can be toggled from - Task Manager's
-    # Startup tab. HKLM (machine scope) runs pype for every user at logon;
-    # HKCU (user scope) for the current user only.
-    $approvedPath = Get-StartupApprovedPath -ScopeName $resolvedScope
-    if ($enableAutoStart) {
-        New-Item -Path $runKeyPath -Force | Out-Null
-        New-ItemProperty -Path $runKeyPath -Name 'pype' -Value "`"$destExe`"" -PropertyType String -Force | Out-Null
-        # If pype was previously disabled in Task Manager's Startup tab, clear
-        # that record so this install's autostart actually takes effect.
-        if (Test-Path -LiteralPath $approvedPath) {
-            Remove-ItemProperty -LiteralPath $approvedPath -Name 'pype' -Force -ErrorAction SilentlyContinue
-        }
-        Write-PypeLog "Enabled autostart via $runKeyPath (visible in Task Manager > Startup)."
-    }
-    else {
-        # Not enabling: make sure no stale Run entry lingers from a prior install.
-        if (Test-Path -LiteralPath $runKeyPath) {
-            Remove-ItemProperty -LiteralPath $runKeyPath -Name 'pype' -Force -ErrorAction SilentlyContinue
-        }
-        Write-PypeLog 'Autostart not enabled.'
-    }
 
     if (-not $NoStartMenuShortcut) {
         $wsh = $null

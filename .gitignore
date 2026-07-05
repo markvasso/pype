@@ -4,12 +4,13 @@ publish/
 # Windows build outputs are NOT checked in - the self-contained pype.exe is
 # ~150MB and PypeSetup.exe ~63MB, both over GitHub's 100MB hard push limit
 # (the first would outright fail to push). Build them locally instead: see
-# windows/README.md ("Building"). mac/dist/ is the opposite case - pype.app
-# and PypeInstaller.pkg are only a few hundred KB (Swift dynamically links
-# system frameworks rather than bundling a runtime), so those ARE checked in
-# for "ready to install immediately" convenience.
+# windows/README.md ("Building"). The macOS .pkg IS checked in (a few hundred
+# KB - Swift dynamically links system frameworks rather than bundling a
+# runtime) for "ready to install immediately" convenience; the loose .app is
+# just a build artifact the .pkg is made from, so it's not committed.
 /windows/dist/
 /windows/installer/pype.exe
+/mac/dist/pype.app/
 *.user
 .DS_Store
 .build/

@@ -9,8 +9,10 @@ import ApplicationServices
 final class StatusBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let hotkeyManager = HotkeyManager()
+    private let typeItem = NSMenuItem()
     private let runAtLoginItem = NSMenuItem()
     private let accessibilityItem = NSMenuItem()
+    private let updateCheckItem = NSMenuItem()
     private let quitItem = NSMenuItem()
     private var isTyping = false
     // Guards the "needs Accessibility" notification so it fires at most once
@@ -37,6 +39,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let menu = NSMenu()
         menu.delegate = self
 
+        // Primary action first: type the clipboard, same as the hotkey.
+        typeItem.title = "Type Clipboard"
+        typeItem.action = #selector(typeClipboardFromMenu)
+        typeItem.target = self
+        menu.addItem(typeItem)
+
+        menu.addItem(.separator())
+
         let aboutItem = NSMenuItem(title: "About pype", action: #selector(showAbout), keyEquivalent: "")
         aboutItem.target = self
         menu.addItem(aboutItem)
@@ -58,6 +68,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         runAtLoginItem.target = self
         menu.addItem(runAtLoginItem)
 
+        updateCheckItem.title = "Check for updates on startup"
+        updateCheckItem.action = #selector(toggleUpdateCheck)
+        updateCheckItem.target = self
+        menu.addItem(updateCheckItem)
+
         menu.addItem(.separator())
 
         quitItem.title = "Quit"
@@ -70,10 +85,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
         // HotkeyManager's callback fires from a synchronous Carbon C
         // callback, which can't itself be async - wrap in an unstructured
-        // Task so handleHotkey can use Task.sleep for the paced typing
+        // Task so typeClipboard can use Task.sleep for the paced typing
         // effect without blocking that callback or the run loop.
         hotkeyManager.onHotkey = { [weak self] in
-            Task { await self?.handleHotkey() }
+            Task { await self?.typeClipboard(fromMenu: false) }
         }
         if !hotkeyManager.register() {
             NotificationManager.show(
@@ -90,6 +105,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     // already started, and reflects live Accessibility status.
     func menuWillOpen(_ menu: NSMenu) {
         runAtLoginItem.state = AutoStartManager.isEnabled ? .on : .off
+        updateCheckItem.state = Settings.checkForUpdatesOnStartup ? .on : .off
+        // Grey out both the in-progress-sensitive items while a paced type is
+        // running (the isTyping guard already rejects a re-entrant trigger,
+        // but a disabled item is the honest affordance).
+        typeItem.isEnabled = !isTyping
         quitItem.isEnabled = !isTyping
 
         if AXIsProcessTrusted() {
@@ -102,6 +122,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             accessibilityItem.state = .off
             accessibilityItem.isEnabled = true
         }
+    }
+
+    @objc private func typeClipboardFromMenu() {
+        Task { await typeClipboard(fromMenu: true) }
+    }
+
+    @objc private func toggleUpdateCheck() {
+        Settings.checkForUpdatesOnStartup.toggle()
+        updateCheckItem.state = Settings.checkForUpdatesOnStartup ? .on : .off
     }
 
     @objc private func fixAccessibility() {
@@ -143,7 +172,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "\(AppInfo.displayName) \(AppInfo.version)"
         alert.informativeText = """
-            Press Cmd+Shift+V anywhere to type the clipboard's text content.
+            Press Cmd+Shift+V anywhere (or use "Type Clipboard" in this menu) to type the clipboard's text content.
             Text over \(AppInfo.maxTypeLength) characters is truncated.
             """
         alert.alertStyle = .informational
@@ -180,15 +209,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         NSApp.terminate(nil)
     }
 
-    private func handleHotkey() async {
+    private func typeClipboard(fromMenu: Bool) async {
         // Typing is paced over real time (see AppInfo.typingIntervalNanoseconds)
         // - up to ~1.3s for the full 128 characters - instead of one
-        // instantaneous burst, so there's a real window for the hotkey to
-        // fire again before the previous run finishes. Without this guard,
-        // two overlapping ClipboardTyper.type calls would interleave their
-        // keystrokes into garbled output. StatusBarController is @MainActor,
-        // and this method (like the Task{} that calls it) always runs on
-        // that actor, so this check-then-set is race-free.
+        // instantaneous burst, so there's a real window for another trigger to
+        // arrive before this run finishes. Without this guard, two overlapping
+        // ClipboardTyper.type calls would interleave their keystrokes into
+        // garbled output. StatusBarController is @MainActor, and this method
+        // (like the Task{}s that call it) always runs on that actor, so this
+        // check-then-set is race-free.
         guard !isTyping else { return }
         isTyping = true
         // Also disable Quit for that same window: without this, choosing
@@ -248,6 +277,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 title: "pype - text truncated",
                 body: "Clipboard held \(text.count) characters; only the first \(toType.count) were typed."
             )
+        }
+
+        // Triggered from the menu: let focus return to the target window after
+        // the menu closes before injecting keystrokes, so the first characters
+        // don't land on the menu/status item. The hotkey path needs no delay.
+        if fromMenu {
+            try? await Task.sleep(nanoseconds: AppInfo.menuTypeFocusDelayNanoseconds)
         }
 
         await ClipboardTyper.type(toType)

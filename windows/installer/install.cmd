@@ -10,7 +10,7 @@ REM                              an elevated session)
 REM   /CURRENTUSER               per-user install (%LOCALAPPDATA%, no admin needed)
 REM Any further arguments are forwarded to Install-Pype.ps1 as-is (quoting
 REM preserved) via %*, e.g.:
-REM   install.cmd /S /ALLUSERS -NoAutoStart
+REM   install.cmd /S /ALLUSERS -NoStartMenuShortcut
 setlocal
 set "SCRIPT_DIR=%~dp0"
 set "SILENT_FLAG="

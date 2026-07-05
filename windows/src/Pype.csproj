@@ -17,7 +17,7 @@
          installer reads the built exe's own FileVersionInfo at install time
          (not this file) to populate the registry DisplayVersion, so what's
          registered always matches what's actually on disk. -->
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
 
     <InvariantGlobalization>true</InvariantGlobalization>
 
