@@ -15,9 +15,9 @@
     <!-- Keep in sync with <Version> in ../windows/src/Pype.csproj and
          PRODUCT_VERSION in ../windows/installer/PypeSetup.nsi on each release. -->
     <key>CFBundleVersion</key>
-    <string>1.2.4</string>
+    <string>1.2.5</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.2.4</string>
+    <string>1.2.5</string>
     <key>CFBundleExecutable</key>
     <string>pype</string>
     <key>CFBundleIconFile</key>

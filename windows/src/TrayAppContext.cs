@@ -9,40 +9,15 @@ namespace Pype;
 
 internal sealed class TrayAppContext : ApplicationContext
 {
-    // When the user triggers typing from the tray menu (rather than the
-    // hotkey), give focus a moment to return to the target window after the
-    // menu closes before injecting keystrokes - otherwise the first few could
-    // land in the wrong place. The hotkey path needs no delay (the target
-    // already has focus).
-    private const int MenuTypeFocusDelayMs = 350;
-
-    // Extra pause after re-activating the target window, before typing, so the
-    // activation has actually taken effect (foreground changes are async).
-    private const int FocusSettleMs = 150;
-
     private readonly NotifyIcon _trayIcon;
     private readonly HotkeyWindow _hotkeyWindow;
-    private readonly ToolStripMenuItem _typeItem;
-    private readonly ToolStripMenuItem _typeUnlimitedItem;
-    private readonly ToolStripMenuItem _stopItem;
     private readonly ToolStripMenuItem _exitItem;
     // Installed-edition-only items (null in portable mode).
     private readonly ToolStripMenuItem? _runAtLoginItem;
     private readonly ToolStripMenuItem? _updateCheckItem;
-    private readonly System.Drawing.Image? _clipboardImage;
-    private readonly System.Drawing.Image? _clipboardUnlimitedImage;
     private System.Drawing.Icon? _ownedIcon;
     private bool _isTyping;
     private CancellationTokenSource? _typeCts;
-    // The last non-pype window to hold the foreground - the app a menu-invoked
-    // type should hand focus back to (opening the tray menu makes pype's own
-    // hidden window foreground). Kept current by a foreground-change hook, with
-    // the tray mouse-down handler as a fallback if the hook didn't install.
-    private IntPtr _lastForeground;
-    private IntPtr _foregroundHook;
-    // Held in a field so the GC doesn't collect the delegate the unmanaged hook
-    // still calls back into (that would crash the process).
-    private NativeMethods.WinEventDelegate? _foregroundProc;
 
     public TrayAppContext()
     {
@@ -60,23 +35,19 @@ internal sealed class TrayAppContext : ApplicationContext
             Visible = true
         };
 
-        _clipboardImage = LoadMenuIcon("pype.clipboard.png");
-        _clipboardUnlimitedImage = LoadMenuIcon("pype.clipboard-unlimited.png");
-
-        // Type actions (both menu-triggered). The unlimited one is deliberately
-        // NOT bound to the hotkey - typing an unbounded clipboard should be a
-        // deliberate, explicit action, not something a keystroke can trigger.
-        _typeItem = new ToolStripMenuItem("Type Clipboard", _clipboardImage,
-            async (_, _) => await TypeClipboardAsync(fromMenu: true, unlimited: false));
-        _typeUnlimitedItem = new ToolStripMenuItem("Type Clipboard — No Limit", _clipboardUnlimitedImage,
-            async (_, _) => await TypeClipboardAsync(fromMenu: true, unlimited: true));
-        _stopItem = new ToolStripMenuItem("Stop Typing", null, (_, _) => StopTyping());
+        // Typing is invoked only by the two global hotkeys, never from the
+        // menu - a menu-invoked type couldn't reliably restore focus to the
+        // target app (the tray menu steals it), which is why the menu just
+        // states the shortcuts. These lines are informational (disabled).
+        var typeInfo = new ToolStripMenuItem("Ctrl + ` — Type clipboard") { Enabled = false };
+        var typeAllInfo = new ToolStripMenuItem("Ctrl + Shift + ` — Type all (no limit)") { Enabled = false };
+        var stopInfo = new ToolStripMenuItem("Press the shortcut again to stop") { Enabled = false };
         _exitItem = new ToolStripMenuItem("Exit", null, (_, _) => ExitApp());
 
         var menu = new ContextMenuStrip();
-        menu.Items.Add(_typeItem);
-        menu.Items.Add(_typeUnlimitedItem);
-        menu.Items.Add(_stopItem);
+        menu.Items.Add(typeInfo);
+        menu.Items.Add(typeAllInfo);
+        menu.Items.Add(stopInfo);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("About pype", null, (_, _) => ShowAbout());
 
@@ -94,74 +65,28 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_exitItem);
 
-        // Apply state synchronously as the menu opens so it's correct on the
-        // first (and every) open. While a type is in progress the only enabled
-        // action is Stop Typing - everything else is disabled so a long
-        // "no limit" type can't be interrupted halfway by another action.
+        // Refresh the toggles' checkmarks each time the menu opens (Run at Login
+        // can also be changed outside pype, e.g. in Task Manager's Startup tab).
         menu.Opening += (_, _) =>
         {
-            bool typing = _isTyping;
-            _typeItem.Enabled = !typing;
-            _typeUnlimitedItem.Enabled = !typing;
-            _stopItem.Enabled = typing;
-            _exitItem.Enabled = !typing;
-            if (_runAtLoginItem is not null)
-            {
-                _runAtLoginItem.Enabled = !typing;
-                _runAtLoginItem.Checked = AutoStartManager.IsEnabled();
-            }
-            if (_updateCheckItem is not null)
-            {
-                _updateCheckItem.Enabled = !typing;
-                _updateCheckItem.Checked = Settings.CheckForUpdatesOnStartup;
-            }
+            if (_runAtLoginItem is not null) _runAtLoginItem.Checked = AutoStartManager.IsEnabled();
+            if (_updateCheckItem is not null) _updateCheckItem.Checked = Settings.CheckForUpdatesOnStartup;
         };
         _trayIcon.ContextMenuStrip = menu;
 
-        // Primary capture: a system-wide foreground-change hook keeps
-        // _lastForeground pointing at the last real (non-pype) app, regardless
-        // of exactly when the tray is clicked. WINEVENT_SKIPOWNPROCESS makes it
-        // ignore pype's own window becoming foreground (the menu itself).
-        _foregroundProc = OnForegroundChanged;
-        _foregroundHook = NativeMethods.SetWinEventHook(
-            NativeMethods.EVENT_SYSTEM_FOREGROUND, NativeMethods.EVENT_SYSTEM_FOREGROUND,
-            IntPtr.Zero, _foregroundProc, 0, 0,
-            NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS);
-
-        // Fallback capture: if the hook didn't install, grab the foreground on
-        // tray mouse-down (fires before the menu steals focus).
-        _trayIcon.MouseDown += (_, _) =>
-        {
-            if (_foregroundHook != IntPtr.Zero) return;
-            IntPtr fg = NativeMethods.GetForegroundWindow();
-            if (fg != IntPtr.Zero && !IsOwnWindow(fg))
-            {
-                _lastForeground = fg;
-            }
-        };
-
-        // A left-click on the tray icon while a type is running stops it - the
-        // low-friction stop the user can hit without opening the menu (opening
-        // it mid-type is awkward because the injected keystrokes fight the menu
-        // for focus). Right-click still opens the menu, which also has Stop.
-        _trayIcon.MouseClick += (_, e) =>
-        {
-            if (e.Button == MouseButtons.Left && _isTyping)
-            {
-                StopTyping();
-            }
-        };
-
         try
         {
-            // MOD_NOREPEAT stops WM_HOTKEY from re-firing on OS-level key
-            // repeat while Ctrl+` is held - without it, holding the combo down
-            // would spam OnHotkeyPressed on its own, before _isTyping's
-            // re-entrancy guard even comes into play.
+            // MOD_NOREPEAT stops WM_HOTKEY from re-firing on OS-level key repeat
+            // while the combo is held - without it, holding it down would spam
+            // OnHotkeyPressed before _isTyping's re-entrancy guard comes into play.
             _hotkeyWindow.RegisterHotkey(
                 NativeMethods.MOD_CONTROL | NativeMethods.MOD_NOREPEAT,
                 NativeMethods.VK_OEM_3,
-                AppInfo.HotkeyId);
+                AppInfo.HotkeyIdBounded);
+            _hotkeyWindow.RegisterHotkey(
+                NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT,
+                NativeMethods.VK_OEM_3,
+                AppInfo.HotkeyIdUnlimited);
         }
         catch (Exception ex)
         {
@@ -186,22 +111,22 @@ internal sealed class TrayAppContext : ApplicationContext
         _ = CheckForUpdatesAsync();
     }
 
-    // The hotkey is a toggle: while a type is running it STOPS it, otherwise
-    // it types the bounded (128-char) version. Stopping via the same key the
-    // user already knows is the low-friction way out of a long "No Limit" run -
-    // opening the menu mid-type is awkward, since the injected keystrokes fight
-    // for focus with the menu itself.
-    private async void OnHotkeyPressed()
+    // Both hotkeys are toggles: while a type is running EITHER one stops it;
+    // otherwise Ctrl+` types the bounded (128-char) clipboard and Ctrl+Shift+`
+    // types all of it. The target window keeps focus (the hotkey doesn't steal
+    // it the way opening the tray menu would), so no focus juggling is needed.
+    private async void OnHotkeyPressed(int id)
     {
         if (_isTyping)
         {
             StopTyping();
             return;
         }
-        await TypeClipboardAsync(fromMenu: false, unlimited: false);
+        bool unlimited = id == AppInfo.HotkeyIdUnlimited;
+        await TypeClipboardAsync(unlimited);
     }
 
-    private async Task TypeClipboardAsync(bool fromMenu, bool unlimited)
+    private async Task TypeClipboardAsync(bool unlimited)
     {
         // One type at a time - overlapping runs would interleave keystrokes.
         if (_isTyping) return;
@@ -213,24 +138,6 @@ internal sealed class TrayAppContext : ApplicationContext
 
         try
         {
-            // Triggered from the menu: the menu stole focus to pype's own
-            // hidden window, and it does NOT return to the target app on its
-            // own. Two things have to be right, and the earlier fixes each got
-            // only one:
-            //   1. Timing - wait for the menu to FULLY close first. If we
-            //      restore focus while the menu is still finishing, its own
-            //      close sequence re-activates pype's window right after us.
-            //   2. The foreground lock - restore with the lock timeout zeroed
-            //      plus AttachThreadInput, or SetForegroundWindow is ignored.
-            // So: settle, then restore, then a short beat for the target to
-            // actually come forward, then type.
-            if (fromMenu)
-            {
-                await Task.Delay(MenuTypeFocusDelayMs, token);
-                RestoreForeground(_lastForeground);
-                await Task.Delay(FocusSettleMs, token);
-            }
-
             string text;
             try
             {
@@ -254,13 +161,13 @@ internal sealed class TrayAppContext : ApplicationContext
             // Fire the truncation notice first (non-blocking), then start typing
             // right away. Typing is deliberately paced, not instantaneous - fast,
             // but visibly "typing" rather than an indistinguishable-from-paste
-            // flash. The "No Limit" action skips truncation entirely.
+            // flash. Ctrl+Shift+` (unlimited) skips truncation entirely.
             if (willTruncate)
             {
                 _trayIcon.ShowBalloonTip(
                     4000,
                     "pype - text truncated",
-                    $"Clipboard held {text.Length} characters; only the first {toType.Length} were typed. Use \"Type Clipboard — No Limit\" for all of it.",
+                    $"Clipboard held {text.Length} characters; only the first {toType.Length} were typed. Press Ctrl+Shift+` for all of it.",
                     ToolTipIcon.Warning);
             }
 
@@ -276,7 +183,7 @@ internal sealed class TrayAppContext : ApplicationContext
         }
         catch (OperationCanceledException)
         {
-            // Stopped via "Stop Typing" during the focus delay - nothing to report.
+            // Stopped via the hotkey - nothing to report.
         }
         catch (Exception ex)
         {
@@ -293,82 +200,6 @@ internal sealed class TrayAppContext : ApplicationContext
     }
 
     private void StopTyping() => _typeCts?.Cancel();
-
-    // Foreground-change callback (see the SetWinEventHook in the constructor).
-    // Records real top-level windows only, skipping pype's own - so at any
-    // moment _lastForeground is the app to hand focus back to for a
-    // menu-invoked type.
-    private void OnForegroundChanged(
-        IntPtr hook, uint eventType, IntPtr hwnd,
-        int idObject, int idChild, uint thread, uint time)
-    {
-        if (hwnd != IntPtr.Zero && idObject == NativeMethods.OBJID_WINDOW && !IsOwnWindow(hwnd))
-        {
-            _lastForeground = hwnd;
-        }
-    }
-
-    // True if the window belongs to pype's own process - used to skip pype's
-    // own windows when capturing the "return focus here" target, so opening the
-    // menu doesn't record pype itself as the app to type into.
-    private static bool IsOwnWindow(IntPtr hWnd)
-    {
-        NativeMethods.GetWindowThreadProcessId(hWnd, out uint pid);
-        return pid == (uint)Environment.ProcessId;
-    }
-
-    // Force `target` back to the foreground so menu-invoked keystrokes land in
-    // it. A bare SetForegroundWindow no-ops here because of Windows' foreground
-    // lock (the tray menu left pype's hidden window foreground). Two mutually
-    // reinforcing measures make the steal stick: zero the system foreground-lock
-    // TIMEOUT for the moment (restored right after), and attach our input queue
-    // to the target's thread. Best-effort throughout - any single step failing
-    // just degrades to the prior behavior for this one type, never a crash.
-    private static void RestoreForeground(IntPtr target)
-    {
-        if (target == IntPtr.Zero) return;
-
-        // Drop the foreground-lock timeout to 0, saving the user's value.
-        uint savedTimeout = 0;
-        bool savedTimeoutValid =
-            NativeMethods.SystemParametersInfo(NativeMethods.SPI_GETFOREGROUNDLOCKTIMEOUT, 0, ref savedTimeout, 0);
-        NativeMethods.SystemParametersInfo(NativeMethods.SPI_SETFOREGROUNDLOCKTIMEOUT, 0, IntPtr.Zero, NativeMethods.SPIF_SENDCHANGE);
-
-        uint targetThread = NativeMethods.GetWindowThreadProcessId(target, out _);
-        uint thisThread = NativeMethods.GetCurrentThreadId();
-        bool attached = false;
-
-        try
-        {
-            if (targetThread != thisThread)
-            {
-                attached = NativeMethods.AttachThreadInput(thisThread, targetThread, true);
-            }
-
-            // Un-minimize if needed, then raise + activate + focus while attached.
-            if (NativeMethods.IsIconic(target))
-            {
-                NativeMethods.ShowWindow(target, NativeMethods.SW_RESTORE);
-            }
-            NativeMethods.BringWindowToTop(target);
-            NativeMethods.SetForegroundWindow(target);
-            NativeMethods.SetFocus(target);
-        }
-        finally
-        {
-            if (attached)
-            {
-                NativeMethods.AttachThreadInput(thisThread, targetThread, false);
-            }
-            // Restore the user's foreground-lock timeout (the activation above
-            // has already happened, so this doesn't undo it).
-            if (savedTimeoutValid)
-            {
-                NativeMethods.SystemParametersInfo(
-                    NativeMethods.SPI_SETFOREGROUNDLOCKTIMEOUT, 0, (IntPtr)savedTimeout, NativeMethods.SPIF_SENDCHANGE);
-            }
-        }
-    }
 
     private System.Drawing.Icon LoadAppIcon()
     {
@@ -394,24 +225,6 @@ internal sealed class TrayAppContext : ApplicationContext
         }
 
         return System.Drawing.SystemIcons.Application;
-    }
-
-    // Loads an embedded menu icon by its manifest resource name, returning a
-    // copy independent of the (disposed) stream. Returns null on any failure so
-    // a missing/renamed resource just means "no icon", not a crash.
-    private static System.Drawing.Image? LoadMenuIcon(string logicalName)
-    {
-        try
-        {
-            using var stream = typeof(TrayAppContext).Assembly.GetManifestResourceStream(logicalName);
-            if (stream is null) return null;
-            using var loaded = new System.Drawing.Bitmap(stream);
-            return new System.Drawing.Bitmap(loaded);
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private static string TruncateWithoutSplittingSurrogatePair(string text, int maxLength)
@@ -477,11 +290,10 @@ internal sealed class TrayAppContext : ApplicationContext
         ShowInfoWithLink(
             caption: "About pype",
             heading: $"{AppInfo.DisplayName} {UpdateChecker.LocalVersionString}",
-            body: "Press Ctrl+` anywhere (or use \"Type Clipboard\" in this menu) to\n" +
-                  $"type the clipboard's text content. Text over {AppInfo.MaxTypeLength} characters is\n" +
-                  "truncated; \"Type Clipboard — No Limit\" types all of it.\n\n" +
-                  "To stop a type in progress: press Ctrl+` again, left-click the\n" +
-                  "tray icon, or use \"Stop Typing\".",
+            body: "Press Ctrl+` anywhere to type the clipboard's text content.\n" +
+                  $"Text over {AppInfo.MaxTypeLength} characters is truncated; press Ctrl+Shift+`\n" +
+                  "to type all of it. Press the same shortcut again to stop a\n" +
+                  "type in progress.",
             url: AppInfo.RepoUrl);
     }
 
@@ -540,18 +352,11 @@ internal sealed class TrayAppContext : ApplicationContext
     private void ExitApp()
     {
         _typeCts?.Cancel();
-        if (_foregroundHook != IntPtr.Zero)
-        {
-            NativeMethods.UnhookWinEvent(_foregroundHook);
-            _foregroundHook = IntPtr.Zero;
-        }
         _trayIcon.Visible = false;
         _hotkeyWindow.HotkeyPressed -= OnHotkeyPressed;
         _hotkeyWindow.Dispose();
         _trayIcon.Dispose();
         _ownedIcon?.Dispose();
-        _clipboardImage?.Dispose();
-        _clipboardUnlimitedImage?.Dispose();
         _typeCts?.Dispose();
         ExitThread();
     }

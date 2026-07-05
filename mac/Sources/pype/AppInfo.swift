@@ -17,12 +17,6 @@ enum AppInfo {
     /// enough not to feel sluggish, slow enough to visibly read as "typing."
     static let typingIntervalNanoseconds: UInt64 = 10_000_000 // 10ms
 
-    /// Delay before typing when triggered from the menu, to let focus return
-    /// to the target window after the menu closes so the first characters don't
-    /// land on the menu itself. The Cmd+` hotkey path skips this — the
-    /// target window already has focus.
-    static let menuTypeFocusDelayNanoseconds: UInt64 = 350_000_000 // 350ms
-
     /// Project home, shown/linked in the About dialog.
     static let repoUrl = "https://github.com/markvasso/pype"
 

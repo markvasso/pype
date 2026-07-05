@@ -24,7 +24,10 @@ internal static class AppInfo
     /// <summary>Named mutex used to prevent a second instance from registering the hotkey twice.</summary>
     public const string MutexName = "Local\\Pype.SingleInstance.Mutex";
 
-    public const int HotkeyId = 0xB001;
+    // Two global hotkeys: Ctrl+` types the clipboard (bounded to MaxTypeLength),
+    // Ctrl+Shift+` types all of it. Distinct ids so WM_HOTKEY can tell them apart.
+    public const int HotkeyIdBounded = 0xB001;
+    public const int HotkeyIdUnlimited = 0xB002;
 
     /// <summary>Project home, shown/linked in the About dialog.</summary>
     public const string RepoUrl = "https://github.com/markvasso/pype";

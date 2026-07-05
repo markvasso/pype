@@ -14,7 +14,7 @@ internal static class NativeMethods
     public const uint MOD_NOREPEAT = 0x4000;
 
     // VK_OEM_3 is the `/~ key (left of the "1" row on a US layout) - the
-    // backtick pype's hotkey uses. It's "OEM" because its physical position
+    // backtick pype's hotkeys use. It's "OEM" because its physical position
     // maps to different characters on non-US layouts, but the virtual-key code
     // is stable, which is all RegisterHotKey needs.
     public const uint VK_OEM_3 = 0xC0;
@@ -31,81 +31,6 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
-
-    // Used to restore focus to the window the user was in before opening the
-    // tray menu (which makes pype's own hidden window foreground), so a
-    // menu-invoked type lands in the right place.
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetForegroundWindow();
-
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool SetForegroundWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-
-    // A bare SetForegroundWindow is silently ignored (no-op) when the calling
-    // thread isn't allowed to steal the foreground - Windows' foreground lock.
-    // Temporarily attaching our input queue to the target window's thread
-    // (AttachThreadInput) lifts that restriction so the activation sticks.
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
-
-    [DllImport("kernel32.dll")]
-    public static extern uint GetCurrentThreadId();
-
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool BringWindowToTop(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern IntPtr SetFocus(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-    [DllImport("user32.dll")]
-    public static extern bool IsIconic(IntPtr hWnd);
-
-    public const int SW_RESTORE = 9;
-
-    // The foreground lock TIMEOUT is the root of why SetForegroundWindow gets
-    // ignored: Windows refuses foreground steals for a window until this many ms
-    // after the user last interacted with its process. Temporarily zeroing it
-    // (save + restore the user's value) makes the steal reliably honored - the
-    // heavy hammer AttachThreadInput alone didn't land.
-    public const uint SPI_GETFOREGROUNDLOCKTIMEOUT = 0x2000;
-    public const uint SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001;
-    public const uint SPIF_SENDCHANGE = 0x02;
-
-    // Two overloads: GET writes into a uint (by ref); SET passes the new value
-    // itself in the pvParam pointer slot.
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref uint pvParam, uint fWinIni);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
-
-    // A foreground-change listener is the reliable way to know which app the
-    // user was in before opening the tray menu - it doesn't depend on a
-    // particular mouse event firing at the right instant. WINEVENT_SKIPOWNPROCESS
-    // makes it ignore pype's own windows becoming foreground (i.e. the menu),
-    // so the recorded window stays the real target.
-    public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
-    public const uint WINEVENT_OUTOFCONTEXT = 0x0000;
-    public const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
-    public const int OBJID_WINDOW = 0;
-
-    public delegate void WinEventDelegate(
-        IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
-        int idObject, int idChild, uint dwEventThread, uint dwmsEventTime);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern IntPtr SetWinEventHook(
-        uint eventMin, uint eventMax, IntPtr hmodWinEventProc,
-        WinEventDelegate lpfnWinEventProc, uint idProcess, uint idThread, uint dwFlags);
-
-    [DllImport("user32.dll")]
-    public static extern bool UnhookWinEvent(IntPtr hWinEventHook);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct INPUT

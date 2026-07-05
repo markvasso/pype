@@ -6,10 +6,12 @@ import ApplicationServices
 
 /// Menu bar item + menu — the macOS equivalent of the Windows tray icon.
 ///
-/// Typing can be triggered either by the global Cmd+` hotkey (the Mac-native
-/// counterpart of the Windows build's Ctrl+`) or from this menu. Only the
-/// keystroke *injection* in ClipboardTyper needs Accessibility permission —
-/// hotkey *detection* (Carbon RegisterEventHotKey) needs none.
+/// Typing is invoked only by the two global hotkeys: Cmd+` types the clipboard
+/// (bounded) and Cmd+Shift+` types all of it; pressing either again stops a
+/// type in progress. The menu itself just states the shortcuts (a menu-invoked
+/// type couldn't reliably keep focus on the target app). Only the keystroke
+/// *injection* in ClipboardTyper needs Accessibility permission — hotkey
+/// *detection* (Carbon RegisterEventHotKey) needs none.
 ///
 /// Because these builds aren't Developer ID signed, the Accessibility grant
 /// doesn't survive an update (the new build has a different code identity), so
@@ -20,13 +22,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
     private let hotkeyManager = HotkeyManager()
-    private let typeItem = NSMenuItem()
-    private let typeUnlimitedItem = NSMenuItem()
-    private let stopItem = NSMenuItem()
     private let accessibilityItem = NSMenuItem()
     private let runAtLoginItem = NSMenuItem()
     private let updateCheckItem = NSMenuItem()
-    private let quitItem = NSMenuItem()
     private var isTyping = false
     private var typingTask: Task<Void, Never>?
     // Shows the "needs Accessibility" notice at most once per not-granted
@@ -46,39 +44,18 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 // bundled icon resource is missing for some reason.
                 button.title = "pype"
             }
-            // Handle clicks ourselves instead of assigning statusItem.menu
-            // permanently: while a type runs a click must STOP it (not open the
-            // menu), and otherwise it should open the menu. statusItemClicked
-            // decides which, assigning the menu transiently when it needs to
-            // open (see there).
-            button.target = self
-            button.action = #selector(statusItemClicked)
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
         menu.delegate = self
+        // We manage enabled state ourselves (the info lines below stay disabled;
+        // the accessibility item is toggled live in menuWillOpen).
+        menu.autoenablesItems = false
 
-        // Primary action: type the clipboard (bounded to 128 characters),
-        // same as the Cmd+` hotkey.
-        typeItem.title = "Type Clipboard"
-        typeItem.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Type clipboard")
-        typeItem.action = #selector(typeClipboard(_:))
-        typeItem.target = self
-        menu.addItem(typeItem)
-
-        // Types the ENTIRE clipboard, no 128-char cap. Deliberately menu-only
-        // (never the hotkey) so injecting an unbounded clipboard is always an
-        // explicit, deliberate action.
-        typeUnlimitedItem.title = "Type Clipboard — No Limit"
-        typeUnlimitedItem.image = NSImage(systemSymbolName: "list.clipboard", accessibilityDescription: "Type entire clipboard")
-        typeUnlimitedItem.action = #selector(typeClipboardUnlimited(_:))
-        typeUnlimitedItem.target = self
-        menu.addItem(typeUnlimitedItem)
-
-        stopItem.title = "Stop Typing"
-        stopItem.action = #selector(stopTyping)
-        stopItem.target = self
-        menu.addItem(stopItem)
+        // Informational lines stating the shortcuts. Typing is hotkey-only, so
+        // these aren't actions - just a reminder of the two combos.
+        menu.addItem(infoItem("⌘` — Type clipboard"))
+        menu.addItem(infoItem("⌘⇧` — Type all (no limit)"))
+        menu.addItem(infoItem("Press the shortcut again to stop"))
 
         menu.addItem(.separator())
 
@@ -91,8 +68,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         // Accessibility status/affordance. Its title and enabled state are set
         // live in menuWillOpen (AXIsProcessTrusted is a fast local call, safe
         // to query synchronously as the menu opens). Gives the user a
-        // persistent, non-spammy way to see whether pype can actually type and
-        // to jump straight to the setup + troubleshooting guidance.
+        // persistent way to see whether pype can actually type and to jump
+        // straight to the setup + troubleshooting guidance.
         accessibilityItem.action = #selector(grantAccessibility)
         accessibilityItem.target = self
         menu.addItem(accessibilityItem)
@@ -109,70 +86,45 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        quitItem.title = "Quit"
-        quitItem.action = #selector(quit)
-        quitItem.keyEquivalent = "q"
+        let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
-        // HotkeyManager's callback (Cmd+`) fires from a synchronous Carbon C
-        // callback, which can't itself be async - hop to the main actor. The
-        // hotkey is a toggle: while a type runs it STOPS it (the low-friction
-        // way out of a long "No Limit" run — reaching the menu mid-type is
-        // awkward), and otherwise it starts a bounded, non-menu type. It never
-        // triggers the unbounded "No Limit" variant.
-        hotkeyManager.onHotkey = { [weak self] in
+        statusItem.menu = menu
+
+        // HotkeyManager's callback fires from a synchronous Carbon C callback,
+        // which can't itself be async - hop to the main actor. Both hotkeys are
+        // toggles: while a type runs either STOPS it; otherwise Cmd+` types the
+        // bounded clipboard and Cmd+Shift+` types all of it. The target window
+        // keeps focus (unlike opening the menu), so no focus juggling is needed.
+        hotkeyManager.onHotkey = { [weak self] unlimited in
             Task { @MainActor in
                 guard let self else { return }
                 if self.isTyping {
                     self.stopTyping()
                 } else {
-                    self.startTyping(unlimited: false, fromMenu: false)
+                    self.startTyping(unlimited: unlimited)
                 }
             }
         }
         if !hotkeyManager.register() {
             NotificationManager.show(
                 title: "pype",
-                body: "Could not register the Cmd+` hotkey. It may already be in use by another app or by the macOS \"move focus to next window\" shortcut. You can still type from the menu bar icon."
+                body: "Could not register the Cmd+` / Cmd+Shift+` hotkeys. They may already be in use by another app or by the macOS \"move focus to next/previous window\" shortcuts."
             )
         }
     }
 
-    // A click on the menu bar icon. While a type is running it STOPS it - the
-    // easy-to-hit stop that doesn't require opening the menu (opening it
-    // mid-type is awkward, since the injected keystrokes fight the menu for
-    // focus). Otherwise it opens the menu.
-    //
-    // The menu is assigned to statusItem only for this click and cleared in
-    // menuDidClose, so macOS positions it natively (right under the item, all
-    // items visible) - unlike popUp with manual coordinates, which mis-anchored
-    // the menu and scrolled the first item out of view. Clearing it afterward
-    // routes the next click back here, so a click can still choose stop vs open.
-    @objc private func statusItemClicked() {
-        if isTyping {
-            stopTyping()
-            return
-        }
-        statusItem.menu = menu
-        statusItem.button?.performClick(nil)
+    private func infoItem(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
     }
 
-    func menuDidClose(_ menu: NSMenu) {
-        statusItem.menu = nil
-    }
-
-    // Refreshes item state each time the menu opens. While a type is in
-    // progress the only enabled action is Stop Typing, so a long "no limit"
-    // type can't be interrupted halfway by another action. Also reflects live
-    // Accessibility status.
+    // Refreshes the toggle checkmarks and the live Accessibility status each
+    // time the menu opens (Run at Login can also be changed outside pype, e.g.
+    // in System Settings > Login Items).
     func menuWillOpen(_ menu: NSMenu) {
-        typeItem.isEnabled = !isTyping
-        typeUnlimitedItem.isEnabled = !isTyping
-        stopItem.isEnabled = isTyping
-        quitItem.isEnabled = !isTyping
-        runAtLoginItem.isEnabled = !isTyping
-        updateCheckItem.isEnabled = !isTyping
         runAtLoginItem.state = AutoStartManager.isEnabled ? .on : .off
         updateCheckItem.state = Settings.checkForUpdatesOnStartup ? .on : .off
 
@@ -184,30 +136,22 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         } else {
             accessibilityItem.title = "Grant Accessibility Access…"
             accessibilityItem.state = .off
-            accessibilityItem.isEnabled = !isTyping
+            accessibilityItem.isEnabled = true
         }
     }
 
-    @objc private func typeClipboard(_ sender: Any?) {
-        startTyping(unlimited: false, fromMenu: true)
-    }
-
-    @objc private func typeClipboardUnlimited(_ sender: Any?) {
-        startTyping(unlimited: true, fromMenu: true)
-    }
-
-    private func startTyping(unlimited: Bool, fromMenu: Bool) {
+    private func startTyping(unlimited: Bool) {
         // Set isTyping synchronously here, on the main actor, BEFORE launching
         // the task - not inside performTyping. If it were only set inside the
         // (asynchronously-scheduled) task, two rapid triggers could both pass
-        // the guard and overwrite `typingTask`, leaving Stop Typing pointed at
-        // the wrong task. Setting it here makes the check-and-set atomic.
+        // the guard and overwrite `typingTask`, leaving the stop pointed at the
+        // wrong task. Setting it here makes the check-and-set atomic.
         guard !isTyping else { return }
         isTyping = true
-        typingTask = Task { await performTyping(unlimited: unlimited, fromMenu: fromMenu) }
+        typingTask = Task { await performTyping(unlimited: unlimited) }
     }
 
-    @objc private func stopTyping() {
+    private func stopTyping() {
         typingTask?.cancel()
     }
 
@@ -285,10 +229,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "\(AppInfo.displayName) \(AppInfo.version)"
         alert.informativeText = """
-            Press Cmd+` anywhere (or use "Type Clipboard" in this menu) to type the clipboard's text content.
-            Text over \(AppInfo.maxTypeLength) characters is truncated; "Type Clipboard — No Limit" types all of it.
+            Press Cmd+` anywhere to type the clipboard's text content. Text over \(AppInfo.maxTypeLength) characters is truncated; press Cmd+Shift+` to type all of it.
 
-            To stop a type in progress: press Cmd+` again, click the menu bar icon, or use "Stop Typing".
+            Press the same shortcut again to stop a type in progress.
             """
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
@@ -325,7 +268,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         NSApp.terminate(nil)
     }
 
-    private func performTyping(unlimited: Bool, fromMenu: Bool) async {
+    private func performTyping(unlimited: Bool) async {
         // isTyping was set by startTyping (synchronously, on the main actor)
         // before this task was launched, so the single-run guarantee holds;
         // this just clears it when the run finishes, however it exits.
@@ -357,25 +300,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         // cut would — no separate surrogate-pair-safety check needed here.
         let toType = willTruncate ? String(text.prefix(AppInfo.maxTypeLength)) : text
 
-        // Fire the truncation notice first (non-blocking). The "No Limit"
-        // action skips truncation entirely.
+        // Fire the truncation notice first (non-blocking). Cmd+Shift+` skips
+        // truncation entirely.
         if willTruncate {
             NotificationManager.show(
                 title: "pype - text truncated",
-                body: "Clipboard held \(text.count) characters; only the first \(toType.count) were typed. Use \"Type Clipboard — No Limit\" for all of it."
+                body: "Clipboard held \(text.count) characters; only the first \(toType.count) were typed. Press Cmd+Shift+` for all of it."
             )
-        }
-
-        // Triggered from the menu: let focus return to the target window after
-        // the menu closes before injecting keystrokes, so the first characters
-        // don't land on the menu. The hotkey path needs no delay — the target
-        // already has focus.
-        if fromMenu {
-            do {
-                try await Task.sleep(nanoseconds: AppInfo.menuTypeFocusDelayNanoseconds)
-            } catch {
-                return // cancelled during the focus delay
-            }
         }
 
         await ClipboardTyper.type(toType)

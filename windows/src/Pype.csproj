@@ -18,7 +18,7 @@
          (not this file) to populate the registry DisplayVersion, so what's
          registered always matches what's actually on disk. Keep it numeric
          (X.Y.Z), matching mac/Info.plist and PypeSetup.nsi. -->
-    <Version>1.2.4</Version>
+    <Version>1.2.5</Version>
 
     <InvariantGlobalization>true</InvariantGlobalization>
 
@@ -45,11 +45,5 @@
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
-  <!-- Menu icons embedded into the exe so the single-file build stays a single
-       file. Loaded by name at runtime (see TrayAppContext.LoadMenuIcon). -->
-  <ItemGroup>
-    <EmbeddedResource Include="icons\clipboard-32.png" LogicalName="pype.clipboard.png" />
-    <EmbeddedResource Include="icons\clipboard-unlimited-32.png" LogicalName="pype.clipboard-unlimited.png" />
-  </ItemGroup>
 
 </Project>
