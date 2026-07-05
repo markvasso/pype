@@ -16,6 +16,10 @@ internal sealed class TrayAppContext : ApplicationContext
     // already has focus).
     private const int MenuTypeFocusDelayMs = 350;
 
+    // Extra pause after re-activating the target window, before typing, so the
+    // activation has actually taken effect (foreground changes are async).
+    private const int FocusSettleMs = 150;
+
     private readonly NotifyIcon _trayIcon;
     private readonly HotkeyWindow _hotkeyWindow;
     private readonly ToolStripMenuItem _typeItem;
@@ -211,15 +215,20 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             // Triggered from the menu: the menu stole focus to pype's own
             // hidden window, and it does NOT return to the target app on its
-            // own. Re-activate the window the user was in (captured on tray
-            // mouse-down) via AttachThreadInput - a plain SetForegroundWindow is
-            // silently ignored here (the foreground lock), which is why the
-            // earlier fix didn't work. Then wait for the activation to settle
-            // before injecting keystrokes.
+            // own. Two things have to be right, and the earlier fixes each got
+            // only one:
+            //   1. Timing - wait for the menu to FULLY close first. If we
+            //      restore focus while the menu is still finishing, its own
+            //      close sequence re-activates pype's window right after us.
+            //   2. The foreground lock - restore with the lock timeout zeroed
+            //      plus AttachThreadInput, or SetForegroundWindow is ignored.
+            // So: settle, then restore, then a short beat for the target to
+            // actually come forward, then type.
             if (fromMenu)
             {
-                RestoreForeground(_lastForeground);
                 await Task.Delay(MenuTypeFocusDelayMs, token);
+                RestoreForeground(_lastForeground);
+                await Task.Delay(FocusSettleMs, token);
             }
 
             string text;
@@ -310,14 +319,20 @@ internal sealed class TrayAppContext : ApplicationContext
 
     // Force `target` back to the foreground so menu-invoked keystrokes land in
     // it. A bare SetForegroundWindow no-ops here because of Windows' foreground
-    // lock (the tray menu left pype's hidden window foreground). Attaching our
-    // input queue to the target's thread for the duration lifts the lock so the
-    // activation actually takes effect - this is what the previous attempt was
-    // missing. Best-effort: any step failing just means we fall back to the old
-    // (broken) behavior for this one type, never a crash.
+    // lock (the tray menu left pype's hidden window foreground). Two mutually
+    // reinforcing measures make the steal stick: zero the system foreground-lock
+    // TIMEOUT for the moment (restored right after), and attach our input queue
+    // to the target's thread. Best-effort throughout - any single step failing
+    // just degrades to the prior behavior for this one type, never a crash.
     private static void RestoreForeground(IntPtr target)
     {
         if (target == IntPtr.Zero) return;
+
+        // Drop the foreground-lock timeout to 0, saving the user's value.
+        uint savedTimeout = 0;
+        bool savedTimeoutValid =
+            NativeMethods.SystemParametersInfo(NativeMethods.SPI_GETFOREGROUNDLOCKTIMEOUT, 0, ref savedTimeout, 0);
+        NativeMethods.SystemParametersInfo(NativeMethods.SPI_SETFOREGROUNDLOCKTIMEOUT, 0, IntPtr.Zero, NativeMethods.SPIF_SENDCHANGE);
 
         uint targetThread = NativeMethods.GetWindowThreadProcessId(target, out _);
         uint thisThread = NativeMethods.GetCurrentThreadId();
@@ -344,6 +359,13 @@ internal sealed class TrayAppContext : ApplicationContext
             if (attached)
             {
                 NativeMethods.AttachThreadInput(thisThread, targetThread, false);
+            }
+            // Restore the user's foreground-lock timeout (the activation above
+            // has already happened, so this doesn't undo it).
+            if (savedTimeoutValid)
+            {
+                NativeMethods.SystemParametersInfo(
+                    NativeMethods.SPI_SETFOREGROUNDLOCKTIMEOUT, 0, (IntPtr)savedTimeout, NativeMethods.SPIF_SENDCHANGE);
             }
         }
     }

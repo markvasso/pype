@@ -68,6 +68,23 @@ internal static class NativeMethods
 
     public const int SW_RESTORE = 9;
 
+    // The foreground lock TIMEOUT is the root of why SetForegroundWindow gets
+    // ignored: Windows refuses foreground steals for a window until this many ms
+    // after the user last interacted with its process. Temporarily zeroing it
+    // (save + restore the user's value) makes the steal reliably honored - the
+    // heavy hammer AttachThreadInput alone didn't land.
+    public const uint SPI_GETFOREGROUNDLOCKTIMEOUT = 0x2000;
+    public const uint SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001;
+    public const uint SPIF_SENDCHANGE = 0x02;
+
+    // Two overloads: GET writes into a uint (by ref); SET passes the new value
+    // itself in the pvParam pointer slot.
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref uint pvParam, uint fWinIni);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+
     // A foreground-change listener is the reliable way to know which app the
     // user was in before opening the tray menu - it doesn't depend on a
     // particular mouse event firing at the right instant. WINEVENT_SKIPOWNPROCESS
