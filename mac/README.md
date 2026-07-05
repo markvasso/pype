@@ -168,9 +168,11 @@ when active), a "Check for updates on startup" toggle, and Quit.
 ## Update check
 
 On launch pype checks the GitHub releases API once for a newer version and, if
-found, shows a notice with a button to open the downloads page. This is the
-only network request pype makes — it sends no data beyond a standard API call
-and fails silently offline.
+found, shows a notice with a button to open the downloads page. It stays silent
+when you're up to date, so it never interrupts. To check on demand — and get a
+result either way — use **Check for updates now** in the menu. This is the only
+network request pype makes; it sends no data beyond a standard API call and
+fails silently offline.
 
 ## Testing notes
 

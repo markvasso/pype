@@ -50,10 +50,12 @@ Manager.
   installers did, which could leave two startup entries and launch pype
   twice). The tray shows a checkmark when it's active.
 - **On launch** the installed edition checks the GitHub releases API once for
-  a newer version and, if found, shows a popup linking to the downloads page.
-  This is the only network request pype makes and sends no data beyond a
-  normal API call; it fails silently offline. It can be turned off via the
-  tray menu's **"Check for updates on startup"** toggle.
+  a newer version and, if found, shows a popup linking to the downloads page;
+  it stays silent when you're up to date. To check on demand — and get a result
+  either way — use **"Check for updates now"** in the tray menu. This is the
+  only network request pype makes and sends no data beyond a normal API call;
+  it fails silently offline. The launch check can be turned off via the tray
+  menu's **"Check for updates on startup"** toggle.
 - **About** (tray menu) links to the project's GitHub page.
 - **Portable vs installed**: the same `pype.exe` runs either way. Run on its
   own it's *portable* — the hotkey, About, and Exit. Placed by the installer

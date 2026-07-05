@@ -78,6 +78,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         runAtLoginItem.target = self
         menu.addItem(runAtLoginItem)
 
+        let checkNowItem = NSMenuItem(title: "Check for updates now", action: #selector(checkForUpdatesNow), keyEquivalent: "")
+        checkNowItem.target = self
+        menu.addItem(checkNowItem)
+
         updateCheckItem.title = "Check for updates on startup"
         updateCheckItem.action = #selector(toggleUpdateCheck)
         updateCheckItem.target = self
@@ -157,6 +161,27 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     @objc private func toggleUpdateCheck() {
         Settings.checkForUpdatesOnStartup.toggle()
         updateCheckItem.state = Settings.checkForUpdatesOnStartup ? .on : .off
+    }
+
+    // Manual "Check for updates now" - shows a result either way so the user can
+    // confirm the check actually ran (the automatic launch check stays silent
+    // unless there's a newer version, so it never interrupts).
+    @objc private func checkForUpdatesNow() {
+        Task { @MainActor in
+            if let newer = await UpdateChecker.newerVersion() {
+                notifyUpdateAvailable(newer)
+            } else {
+                let alert = NSAlert()
+                alert.messageText = "pype \(AppInfo.version)"
+                // newerVersion() returns nil for "up to date" AND a failed
+                // check, so word it honestly rather than asserting up to date.
+                alert.informativeText = "No newer version was found on GitHub (you're up to date, or the check couldn't reach GitHub just now)."
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: "OK")
+                NSApp.activate(ignoringOtherApps: true)
+                alert.runModal()
+            }
+        }
     }
 
     @objc private func grantAccessibility() {

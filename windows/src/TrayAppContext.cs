@@ -18,6 +18,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private System.Drawing.Icon? _ownedIcon;
     private bool _isTyping;
     private CancellationTokenSource? _typeCts;
+    private System.Windows.Forms.Timer? _startupUpdateTimer;
 
     public TrayAppContext()
     {
@@ -55,8 +56,11 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             _runAtLoginItem = new ToolStripMenuItem("Run at Login", null, (_, _) => ToggleRunAtLogin());
             _updateCheckItem = new ToolStripMenuItem("Check for updates on startup", null, (_, _) => ToggleUpdateCheck());
+            var checkNowItem = new ToolStripMenuItem("Check for updates now", null,
+                async (_, _) => await CheckForUpdatesAsync(userInitiated: true));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(_runAtLoginItem);
+            menu.Items.Add(checkNowItem);
             menu.Items.Add(_updateCheckItem);
         }
 
@@ -87,22 +91,24 @@ internal sealed class TrayAppContext : ApplicationContext
             _trayIcon.ShowBalloonTip(5000, "pype", ex.Message, ToolTipIcon.Error);
         }
 
-        // Update check: installed edition only, and only if the user hasn't
-        // turned it off. Run once the message loop is actually up - starting
-        // the async work in the constructor would run before Application.Run
-        // installs the WinForms SynchronizationContext, so the continuation
-        // (which shows UI) could resume off the UI thread. Application.Idle
-        // first fires once the loop is running.
+        // Startup update check: installed edition only, and only if the user
+        // hasn't turned it off. A one-shot WinForms Timer fires ~2s after the
+        // message loop is up - deterministic, unlike Application.Idle (which can
+        // be unreliable for a form-less tray app). The Tick runs on the UI
+        // thread with the WinForms SynchronizationContext installed, so the
+        // async check's continuation (which shows UI) resumes on the UI thread.
         if (AppMode.IsInstalled && Settings.CheckForUpdatesOnStartup)
         {
-            Application.Idle += OnFirstIdle;
+            _startupUpdateTimer = new System.Windows.Forms.Timer { Interval = 2000 };
+            _startupUpdateTimer.Tick += OnStartupUpdateTick;
+            _startupUpdateTimer.Start();
         }
     }
 
-    private void OnFirstIdle(object? sender, EventArgs e)
+    private void OnStartupUpdateTick(object? sender, EventArgs e)
     {
-        Application.Idle -= OnFirstIdle;
-        _ = CheckForUpdatesAsync();
+        _startupUpdateTimer?.Stop();
+        _ = CheckForUpdatesAsync(userInitiated: false);
     }
 
     // Ctrl+` is a toggle: while a type is running it STOPS it; otherwise it
@@ -265,16 +271,33 @@ internal sealed class TrayAppContext : ApplicationContext
             url: AppInfo.RepoUrl);
     }
 
-    private async Task CheckForUpdatesAsync()
+    // userInitiated: true when the user clicked "Check for updates now" - in
+    // that case we also confirm when there's no update (so they can SEE the
+    // check ran). The startup check stays silent unless there's an update, so
+    // it never interrupts.
+    private async Task CheckForUpdatesAsync(bool userInitiated)
     {
         string? newer = await UpdateChecker.GetNewerVersionAsync();
-        if (newer is null) return; // up to date, offline, or check failed - stay quiet
 
-        ShowInfoWithLink(
-            caption: "pype update available",
-            heading: $"pype {newer} is available",
-            body: $"You're running {UpdateChecker.LocalVersionString}. A newer version can be downloaded from the releases page.",
-            url: AppInfo.ReleasesUrl);
+        if (newer is not null)
+        {
+            ShowInfoWithLink(
+                caption: "pype update available",
+                heading: $"pype {newer} is available",
+                body: $"You're running {UpdateChecker.LocalVersionString}. A newer version can be downloaded from the releases page.",
+                url: AppInfo.ReleasesUrl);
+        }
+        else if (userInitiated)
+        {
+            // GetNewerVersionAsync returns null for "up to date" AND for a
+            // failed check (offline, rate-limited); word it so it's honest
+            // either way rather than falsely asserting "up to date".
+            MessageBox.Show(
+                $"You're running pype {UpdateChecker.LocalVersionString}.\n\nNo newer version was found on GitHub (you're up to date, or the check couldn't reach GitHub just now).",
+                "pype",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
     }
 
     // Shows an info dialog whose text includes a clickable link. Uses the modern
@@ -320,6 +343,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private void ExitApp()
     {
         _typeCts?.Cancel();
+        _startupUpdateTimer?.Dispose();
         _trayIcon.Visible = false;
         _hotkeyWindow.HotkeyPressed -= OnHotkeyPressed;
         _hotkeyWindow.Dispose();

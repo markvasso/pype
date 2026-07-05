@@ -283,6 +283,11 @@ try {
     $displayVersion = if ($versionInfo.ProductVersion) { $versionInfo.ProductVersion.Trim() }
                        elseif ($versionInfo.FileVersion) { $versionInfo.FileVersion.Trim() }
                        else { '0.0.0.0' }
+    # Strip any SemVer build-metadata suffix (e.g. "1.3.0+abcdef") so Control
+    # Panel shows a clean version. The exe is built with
+    # IncludeSourceRevisionInProductVersion=false, but this keeps an older or
+    # differently-built exe from registering the ugly suffix either.
+    $displayVersion = ($displayVersion -split '\+')[0]
     Write-PypeLog "Detected pype.exe version: $displayVersion"
 
     if (-not $NoStartMenuShortcut) {
@@ -338,7 +343,7 @@ try {
 
     Write-PypeLog 'Install complete.'
     if (-not $Silent) {
-        Write-Host "`npype $displayVersion installed ($resolvedScope scope). Press Ctrl+Shift+V anywhere to type clipboard text." -ForegroundColor Green
+        Write-Host "`npype $displayVersion installed ($resolvedScope scope). Press Ctrl+`` anywhere to type clipboard text." -ForegroundColor Green
     }
     exit 0
 }
