@@ -2,18 +2,17 @@
 
 A menu bar port of [pype](../README.md) (see the [Windows
 README](../windows/README.md) for the full project background — that's
-where this project started). Same behavior as the Windows version, driven by
-two hotkeys: press **Cmd+`** anywhere to type the clipboard's text content
-(truncated past 128 characters, with a notice), or **Cmd+Shift+`** to type all
-of it. Press either again to stop a type in progress. The menu bar item just
-states the shortcuts — typing is hotkey-only so the target window keeps focus.
-The backtick key was chosen because it rarely collides with app shortcuts; Cmd
-(rather than the Windows build's Ctrl) is just the Mac-native primary modifier.
+where this project started). Same behavior as the Windows version: press
+**Cmd+`** anywhere to type the clipboard's text content, and press it again to
+stop a type in progress. The menu bar item just states the shortcut — typing is
+hotkey-only so the target window keeps focus. The backtick key was chosen
+because it rarely collides with app shortcuts; Cmd (rather than the Windows
+build's Ctrl) is just the Mac-native primary modifier.
 
-**Note:** macOS assigns **Cmd+`** and **Cmd+Shift+`** to "move focus to
-next/previous window" system-wide. If those system shortcuts are enabled they
-may take precedence — disable them under System Settings > Keyboard > Keyboard
-Shortcuts > Keyboard if pype's hotkeys don't fire.
+**Note:** macOS assigns **Cmd+`** to "move focus to next window" system-wide.
+If that system shortcut is enabled it may take precedence — disable it under
+System Settings > Keyboard > Keyboard Shortcuts > Keyboard if pype's hotkey
+doesn't fire.
 
 The one real platform difference is Accessibility permission — keystroke
 injection needs it, and on these unsigned builds the grant doesn't survive
@@ -48,7 +47,7 @@ equivalent:
   without the permission, pype shows that same guidance **once** (not on every
   keypress) and does nothing else. Hotkey *detection* itself
   (`RegisterEventHotKey`) needs no permission — same as Windows for that part.
-- **Notifications**: requested on first launch for the truncation/error
+- **Notifications**: requested on first launch for the error
   notices. If declined, those notices are silently dropped (logged via
   `os.log` instead) rather than blocking typing.
 
@@ -156,14 +155,11 @@ LaunchAgent plist file — `SMAppService.mainApp` manages that internally).
 
 Copy any text to the clipboard, click wherever you want it typed, then:
 
-- **Cmd+`** — types the clipboard's text, truncated to 128 characters (with a
-  notice) if longer.
-- **Cmd+Shift+`** — types the *entire* clipboard, no cap.
-- **Press either again** — stops a type in progress cleanly (pype keeps
-  running). While a type is running, both hotkeys toggle to stop.
+- **Cmd+`** — types the clipboard's text content.
+- **Press it again** — stops a type in progress cleanly (pype keeps running).
 
 Typing is hotkey-only, so your target window keeps focus and the keystrokes
-land where you expect. The menu bar item just states the shortcuts.
+land where you expect. The menu bar item just states the shortcut.
 
 The menu also has About (which links to the GitHub page), the Accessibility
 status / "Grant Accessibility Access…" item, a "Run at Login" toggle (checkmark
@@ -194,17 +190,17 @@ in System Settings), and a `postinstall` edge case where installing at the
 login screen (`/dev/console` reporting `loginwindow`, not a real user) would
 have tried to launch the app as that system account.
 
-What wasn't tested end-to-end: actually pressing **Cmd+`** / **Cmd+Shift+`**
-after granting Accessibility permission and confirming text types into a real
-target app — that needs an interactive permission grant this environment didn't
-have a way to click through (screen-recording/computer-use access was offered
-and declined). Worth a real test before relying on it.
+What wasn't tested end-to-end: actually pressing **Cmd+`** after granting
+Accessibility permission and confirming text types into a real target app —
+that needs an interactive permission grant this environment didn't have a way
+to click through (screen-recording/computer-use access was offered and
+declined). Worth a real test before relying on it.
 
 ## Known limitations
 
-- **Fixed hotkeys**: Cmd+` and Cmd+Shift+` are not configurable (Windows'
-  equivalents are Ctrl+` / Ctrl+Shift+`). They can also collide with the macOS
-  "move focus to next/previous window" shortcuts — see the intro.
+- **One hotkey**: Cmd+` is fixed, not configurable (Windows' equivalent is
+  Ctrl+`). It can also collide with the macOS "move focus to next window"
+  shortcut — see the intro.
 - **Plain text only**: reads whatever `NSPasteboard.general.string(forType:
   .string)` returns.
 - **macOS 13+ only**: `SMAppService` (Run at Login) requires Ventura or

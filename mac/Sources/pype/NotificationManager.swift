@@ -30,7 +30,7 @@ enum NotificationManager {
             if let error {
                 logger.error("Notification authorization request failed: \(error.localizedDescription, privacy: .public)")
             } else if !granted {
-                logger.notice("Notification permission was declined; truncation/error notices will be silently dropped.")
+                logger.notice("Notification permission was declined; error notices will be silently dropped.")
             }
         }
     }

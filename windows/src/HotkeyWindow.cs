@@ -13,10 +13,9 @@ namespace Pype;
 internal sealed class HotkeyWindow : NativeWindow, IDisposable
 {
     private const int HWND_MESSAGE = -3;
-    private readonly List<int> _registeredIds = new();
+    private int? _registeredId;
 
-    /// <summary>Raised with the hotkey's id when one of the registered combos fires.</summary>
-    public event Action<int>? HotkeyPressed;
+    public event Action? HotkeyPressed;
 
     public HotkeyWindow()
     {
@@ -32,27 +31,26 @@ internal sealed class HotkeyWindow : NativeWindow, IDisposable
         if (!NativeMethods.RegisterHotKey(Handle, id, modifiers, vk))
         {
             throw new InvalidOperationException(
-                "Could not register a pype hotkey (Ctrl+` / Ctrl+Shift+`). It may already be in use by another application.");
+                "Could not register the Ctrl+` hotkey. It may already be in use by another application.");
         }
-        _registeredIds.Add(id);
+        _registeredId = id;
     }
 
     protected override void WndProc(ref Message m)
     {
         if (m.Msg == NativeMethods.WM_HOTKEY)
         {
-            HotkeyPressed?.Invoke(m.WParam.ToInt32());
+            HotkeyPressed?.Invoke();
         }
         base.WndProc(ref m);
     }
 
     public void Dispose()
     {
-        foreach (int id in _registeredIds)
+        if (_registeredId is int id)
         {
             NativeMethods.UnregisterHotKey(Handle, id);
         }
-        _registeredIds.Clear();
         DestroyHandle();
     }
 }

@@ -1,9 +1,7 @@
 # pype
 
 Types the current clipboard's text content wherever your cursor is, triggered
-by a hotkey: **Ctrl+`** types the clipboard (truncated to 128 characters, with
-a tray notification), and **Ctrl+Shift+`** types all of it. Press either again
-to stop a type in progress.
+by **Ctrl+`**. Press the same shortcut again to stop a type in progress.
 
 This README covers the **Windows** version (this folder). There's also a
 **macOS** menu bar version — same behavior, separate Swift/AppKit
@@ -25,17 +23,16 @@ Manager.
 
 ## How it works
 
-- `RegisterHotKey` (Win32) registers two hotkeys against a hidden message-only
-  window — no taskbar/Alt+Tab presence. **Ctrl+`** types the clipboard
-  (bounded), **Ctrl+Shift+`** types all of it. Typing is hotkey-only: the tray
-  menu just states the shortcuts. That's deliberate — a menu-invoked type
-  couldn't reliably keep focus on your target app (opening the tray menu steals
-  focus to pype's own hidden window, and Windows' foreground lock made handing
-  it back unreliable), so the hotkey is the one path where the target window is
-  already focused and keystrokes land where you expect.
-- **Stopping a type in progress**: press **either hotkey again** — while a type
-  is running, both toggle to stop it. Stopping cancels cleanly and leaves pype
-  running. This matters most for the potentially long **Ctrl+Shift+`** run.
+- `RegisterHotKey` (Win32) registers **Ctrl+`** against a hidden message-only
+  window — no taskbar/Alt+Tab presence. Typing is hotkey-only: the tray menu
+  just states the shortcut. That's deliberate — a menu-invoked type couldn't
+  reliably keep focus on your target app (opening the tray menu steals focus to
+  pype's own hidden window, and Windows' foreground lock made handing it back
+  unreliable), so the hotkey is the one path where the target window is already
+  focused and keystrokes land where you expect.
+- **Stopping a type in progress**: press **Ctrl+` again** — while a type is
+  running, the hotkey toggles to stop it. Stopping cancels cleanly and leaves
+  pype running. This matters most for a large clipboard, which can take a while.
 - On trigger, it reads clipboard text (`Clipboard.GetText`, with retry since
   the clipboard is a shared OS resource other apps can transiently hold).
 - Text is typed via `SendInput` using `KEYEVENTF_UNICODE`, which sends raw
@@ -46,10 +43,6 @@ Manager.
   (CRLF, lone CR, or lone LF) are each converted to a single Enter keystroke.
   If Windows blocks the injection (most commonly UIPI, when the target window
   is running elevated as Administrator), a tray notice explains that too.
-- Text over 128 characters is truncated to the first 128 (without splitting
-  a UTF-16 surrogate pair across the boundary) for **Ctrl+`**, and a
-  non-blocking tray balloon notification explains the truncation while typing
-  proceeds immediately. (**Ctrl+Shift+`** skips this cap.)
 - **Autostart** is controlled from the tray menu's **"Run at Login"** toggle
   (installed edition only), which writes the per-user `Run` registry key
   (`HKCU\...\Run`) — visible and toggleable in **Task Manager's Startup tab**.
@@ -63,8 +56,8 @@ Manager.
   tray menu's **"Check for updates on startup"** toggle.
 - **About** (tray menu) links to the project's GitHub page.
 - **Portable vs installed**: the same `pype.exe` runs either way. Run on its
-  own it's *portable* — the two hotkeys, About, and Exit. Placed by the
-  installer (which drops a marker file next to it), it's the
+  own it's *portable* — the hotkey, About, and Exit. Placed by the installer
+  (which drops a marker file next to it), it's the
   *installed* edition and additionally shows Run at Login and the update
   check. Portable pype never touches autostart or the network.
 
@@ -311,10 +304,9 @@ each user to enable — if you need every user's pype to autostart, set the
 ## Usage
 
 Copy any text to the clipboard, place your cursor wherever you want it typed,
-then press **Ctrl+`** (or **Ctrl+Shift+`** to type more than 128 characters).
-To stop a type in progress, press either hotkey again — while a type is running,
-both toggle to stop it. The tray menu states the shortcuts and has About, "Run
-at Login" (see [How it works](#how-it-works)), and Exit.
+then press **Ctrl+`**. To stop a type in progress, press it again. The tray
+menu states the shortcut and has About, "Run at Login" (see
+[How it works](#how-it-works)), and Exit.
 
 ## Known limitations
 
@@ -326,9 +318,9 @@ at Login" (see [How it works](#how-it-works)), and Exit.
 - **Plain text only**: reads whatever `Clipboard.GetText()` returns; rich
   text, images, or files on the clipboard are ignored (nothing is typed, with
   a tray notice if there's no text at all).
-- **Fixed hotkeys**: Ctrl+` and Ctrl+Shift+` are not currently configurable.
-  If another app has already claimed one of them, pype shows a tray error on
-  startup instead of silently failing.
+- **One hotkey**: Ctrl+` is fixed, not currently configurable. If another app
+  has already claimed it, pype shows a tray error on startup instead of
+  silently failing.
 - **Switching scopes**: installing `Machine`-scope on a machine that already
   has a `User`-scope install (or vice versa) leaves both registered rather
   than migrating one into the other. Harmless in practice — the single-

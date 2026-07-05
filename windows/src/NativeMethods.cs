@@ -10,7 +10,6 @@ internal static class NativeMethods
     public const int WM_HOTKEY = 0x0312;
 
     public const uint MOD_CONTROL = 0x0002;
-    public const uint MOD_SHIFT = 0x0004;
     public const uint MOD_NOREPEAT = 0x4000;
 
     // VK_OEM_3 is the `/~ key (left of the "1" row on a US layout) - the

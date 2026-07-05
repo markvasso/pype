@@ -6,12 +6,12 @@ import ApplicationServices
 
 /// Menu bar item + menu — the macOS equivalent of the Windows tray icon.
 ///
-/// Typing is invoked only by the two global hotkeys: Cmd+` types the clipboard
-/// (bounded) and Cmd+Shift+` types all of it; pressing either again stops a
-/// type in progress. The menu itself just states the shortcuts (a menu-invoked
-/// type couldn't reliably keep focus on the target app). Only the keystroke
-/// *injection* in ClipboardTyper needs Accessibility permission — hotkey
-/// *detection* (Carbon RegisterEventHotKey) needs none.
+/// Typing is invoked only by the global Cmd+` hotkey: it types the whole
+/// clipboard, and pressing it again stops a type in progress. The menu itself
+/// just states the shortcut (a menu-invoked type couldn't reliably keep focus
+/// on the target app). Only the keystroke *injection* in ClipboardTyper needs
+/// Accessibility permission — hotkey *detection* (Carbon RegisterEventHotKey)
+/// needs none.
 ///
 /// Because these builds aren't Developer ID signed, the Accessibility grant
 /// doesn't survive an update (the new build has a different code identity), so
@@ -51,10 +51,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         // the accessibility item is toggled live in menuWillOpen).
         menu.autoenablesItems = false
 
-        // Informational lines stating the shortcuts. Typing is hotkey-only, so
-        // these aren't actions - just a reminder of the two combos.
+        // Informational lines stating the shortcut. Typing is hotkey-only, so
+        // these aren't actions - just a reminder.
         menu.addItem(infoItem("⌘` — Type clipboard"))
-        menu.addItem(infoItem("⌘⇧` — Type all (no limit)"))
         menu.addItem(infoItem("Press the shortcut again to stop"))
 
         menu.addItem(.separator())
@@ -93,24 +92,24 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         statusItem.menu = menu
 
         // HotkeyManager's callback fires from a synchronous Carbon C callback,
-        // which can't itself be async - hop to the main actor. Both hotkeys are
-        // toggles: while a type runs either STOPS it; otherwise Cmd+` types the
-        // bounded clipboard and Cmd+Shift+` types all of it. The target window
-        // keeps focus (unlike opening the menu), so no focus juggling is needed.
-        hotkeyManager.onHotkey = { [weak self] unlimited in
+        // which can't itself be async - hop to the main actor. Cmd+` is a
+        // toggle: while a type runs it STOPS it; otherwise it types the whole
+        // clipboard. The target window keeps focus (unlike opening the menu), so
+        // no focus juggling is needed.
+        hotkeyManager.onHotkey = { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
                 if self.isTyping {
                     self.stopTyping()
                 } else {
-                    self.startTyping(unlimited: unlimited)
+                    self.startTyping()
                 }
             }
         }
         if !hotkeyManager.register() {
             NotificationManager.show(
                 title: "pype",
-                body: "Could not register the Cmd+` / Cmd+Shift+` hotkeys. They may already be in use by another app or by the macOS \"move focus to next/previous window\" shortcuts."
+                body: "Could not register the Cmd+` hotkey. It may already be in use by another app or by the macOS \"move focus to next window\" shortcut."
             )
         }
     }
@@ -140,7 +139,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    private func startTyping(unlimited: Bool) {
+    private func startTyping() {
         // Set isTyping synchronously here, on the main actor, BEFORE launching
         // the task - not inside performTyping. If it were only set inside the
         // (asynchronously-scheduled) task, two rapid triggers could both pass
@@ -148,7 +147,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         // wrong task. Setting it here makes the check-and-set atomic.
         guard !isTyping else { return }
         isTyping = true
-        typingTask = Task { await performTyping(unlimited: unlimited) }
+        typingTask = Task { await performTyping() }
     }
 
     private func stopTyping() {
@@ -229,7 +228,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "\(AppInfo.displayName) \(AppInfo.version)"
         alert.informativeText = """
-            Press Cmd+` anywhere to type the clipboard's text content. Text over \(AppInfo.maxTypeLength) characters is truncated; press Cmd+Shift+` to type all of it.
+            Press Cmd+` anywhere to type the clipboard's text content wherever your cursor is.
 
             Press the same shortcut again to stop a type in progress.
             """
@@ -268,7 +267,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         NSApp.terminate(nil)
     }
 
-    private func performTyping(unlimited: Bool) async {
+    private func performTyping() async {
         // isTyping was set by startTyping (synchronously, on the main actor)
         // before this task was launched, so the single-run guarantee holds;
         // this just clears it when the run finishes, however it exits.
@@ -294,21 +293,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
         hasWarnedNoAccessibility = false
 
-        let willTruncate = !unlimited && text.count > AppInfo.maxTypeLength
-        // Character-based truncation (Swift's default String semantics) never
-        // splits an extended grapheme cluster, unlike a raw UTF-16 code-unit
-        // cut would — no separate surrogate-pair-safety check needed here.
-        let toType = willTruncate ? String(text.prefix(AppInfo.maxTypeLength)) : text
-
-        // Fire the truncation notice first (non-blocking). Cmd+Shift+` skips
-        // truncation entirely.
-        if willTruncate {
-            NotificationManager.show(
-                title: "pype - text truncated",
-                body: "Clipboard held \(text.count) characters; only the first \(toType.count) were typed. Press Cmd+Shift+` for all of it."
-            )
-        }
-
-        await ClipboardTyper.type(toType)
+        await ClipboardTyper.type(text)
     }
 }

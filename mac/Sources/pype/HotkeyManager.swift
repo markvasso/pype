@@ -4,12 +4,11 @@
 import Carbon.HIToolbox
 import AppKit
 
-/// Registers two global hotkeys via Carbon's RegisterEventHotKey: Cmd+`
-/// (type the clipboard, bounded) and Cmd+Shift+` (type all of it). Cmd (not
-/// Ctrl) mirrors the Windows build's Ctrl+` / Ctrl+Shift+`; backtick was chosen
-/// because it rarely collides with app shortcuts. Note macOS assigns Cmd+` /
-/// Cmd+Shift+` to "move focus to next/previous window" system-wide, so if those
-/// system shortcuts are enabled this registration may not win — see the README.
+/// Registers Cmd+` (Command + backtick) as a global hotkey via Carbon's
+/// RegisterEventHotKey. Cmd (not Ctrl) mirrors the Windows build's Ctrl+`;
+/// backtick was chosen because it rarely collides with app shortcuts. Note
+/// macOS assigns Cmd+` to "move focus to next window" system-wide, so if that
+/// system shortcut is enabled this registration may not win — see the README.
 ///
 /// This (still fully supported, not deprecated) API is used deliberately
 /// instead of a CGEventTap or NSEvent global monitor: those require the
@@ -19,21 +18,16 @@ import AppKit
 /// This mirrors Windows' RegisterHotKey, which also needs no special
 /// permission.
 final class HotkeyManager {
+    private var hotKeyRef: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
-    private var boundedRef: EventHotKeyRef?
-    private var unlimitedRef: EventHotKeyRef?
 
     private static let signature: OSType = 0x70797065 // 'pype' as a four-char code
-    private static let boundedID: UInt32 = 1
-    private static let unlimitedID: UInt32 = 2
+    private static let hotKeyID: UInt32 = 1
 
-    /// Called when a hotkey fires; `unlimited` is true for Cmd+Shift+`.
-    var onHotkey: ((_ unlimited: Bool) -> Void)?
+    var onHotkey: (() -> Void)?
 
-    /// Registers both hotkeys. Returns true only if both registered; on partial
-    /// or total failure it rolls everything back (so the installed event handler
-    /// can't leak) and returns false. False most commonly means another app or
-    /// the system already owns one of the combos.
+    /// True if the hotkey was registered successfully. False most commonly
+    /// means another app or the system already claimed Cmd+`.
     @discardableResult
     func register() -> Bool {
         var eventType = EventTypeSpec(
@@ -51,15 +45,11 @@ final class HotkeyManager {
                     eventRef, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
                     nil, MemoryLayout<EventHotKeyID>.size, nil, &receivedID
                 )
-                guard status == noErr, receivedID.signature == HotkeyManager.signature else {
+                guard status == noErr, receivedID.id == HotkeyManager.hotKeyID else {
                     return OSStatus(eventNotHandledErr)
                 }
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
-                switch receivedID.id {
-                case HotkeyManager.boundedID: manager.onHotkey?(false)
-                case HotkeyManager.unlimitedID: manager.onHotkey?(true)
-                default: return OSStatus(eventNotHandledErr)
-                }
+                manager.onHotkey?()
                 return noErr
             },
             1, &eventType,
@@ -68,32 +58,29 @@ final class HotkeyManager {
         )
         guard installStatus == noErr else { return false }
 
-        let key = UInt32(kVK_ANSI_Grave)
-        // The two Carbon calls and InstallEventHandler above have no automatic
-        // rollback, so if either RegisterEventHotKey fails, unregister() tears
-        // down whatever did succeed rather than leaking it for the process's life.
-        guard registerOne(id: Self.boundedID, modifiers: UInt32(cmdKey), keyCode: key, into: &boundedRef),
-              registerOne(id: Self.unlimitedID, modifiers: UInt32(cmdKey | shiftKey), keyCode: key, into: &unlimitedRef)
-        else {
+        let hotKeyID = EventHotKeyID(signature: Self.signature, id: Self.hotKeyID)
+        let modifiers = UInt32(cmdKey)
+        let keyCode = UInt32(kVK_ANSI_Grave)
+
+        let registerStatus = RegisterEventHotKey(
+            keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef
+        )
+        guard registerStatus == noErr else {
+            // InstallEventHandler succeeded above but the hotkey itself didn't
+            // (most commonly: another app or the system already owns Cmd+`) -
+            // these are two independent Carbon calls with no automatic rollback,
+            // so without this the event handler installed above would otherwise
+            // leak for the rest of the process's lifetime.
             unregister()
             return false
         }
         return true
     }
 
-    private func registerOne(id: UInt32, modifiers: UInt32, keyCode: UInt32, into ref: inout EventHotKeyRef?) -> Bool {
-        let hotKeyID = EventHotKeyID(signature: Self.signature, id: id)
-        return RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &ref) == noErr
-    }
-
     func unregister() {
-        if let boundedRef {
-            UnregisterEventHotKey(boundedRef)
-            self.boundedRef = nil
-        }
-        if let unlimitedRef {
-            UnregisterEventHotKey(unlimitedRef)
-            self.unlimitedRef = nil
+        if let hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+            self.hotKeyRef = nil
         }
         if let eventHandler {
             RemoveEventHandler(eventHandler)

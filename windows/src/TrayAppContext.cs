@@ -35,18 +35,16 @@ internal sealed class TrayAppContext : ApplicationContext
             Visible = true
         };
 
-        // Typing is invoked only by the two global hotkeys, never from the
-        // menu - a menu-invoked type couldn't reliably restore focus to the
-        // target app (the tray menu steals it), which is why the menu just
-        // states the shortcuts. These lines are informational (disabled).
-        var typeInfo = new ToolStripMenuItem("Ctrl + ` — Type clipboard") { Enabled = false };
-        var typeAllInfo = new ToolStripMenuItem("Ctrl + Shift + ` — Type all (no limit)") { Enabled = false };
+        // Typing is invoked only by the global hotkey, never from the menu - a
+        // menu-invoked type couldn't reliably keep focus on the target app (the
+        // tray menu steals it), which is why the menu just states the shortcut.
+        // These lines are informational (disabled).
+        var typeInfo = new ToolStripMenuItem("Ctrl + ` — Type clipboard") { Enabled = false };
         var stopInfo = new ToolStripMenuItem("Press the shortcut again to stop") { Enabled = false };
         _exitItem = new ToolStripMenuItem("Exit", null, (_, _) => ExitApp());
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(typeInfo);
-        menu.Items.Add(typeAllInfo);
         menu.Items.Add(stopInfo);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("About pype", null, (_, _) => ShowAbout());
@@ -77,16 +75,12 @@ internal sealed class TrayAppContext : ApplicationContext
         try
         {
             // MOD_NOREPEAT stops WM_HOTKEY from re-firing on OS-level key repeat
-            // while the combo is held - without it, holding it down would spam
+            // while Ctrl+` is held - without it, holding it down would spam
             // OnHotkeyPressed before _isTyping's re-entrancy guard comes into play.
             _hotkeyWindow.RegisterHotkey(
                 NativeMethods.MOD_CONTROL | NativeMethods.MOD_NOREPEAT,
                 NativeMethods.VK_OEM_3,
-                AppInfo.HotkeyIdBounded);
-            _hotkeyWindow.RegisterHotkey(
-                NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT,
-                NativeMethods.VK_OEM_3,
-                AppInfo.HotkeyIdUnlimited);
+                AppInfo.HotkeyId);
         }
         catch (Exception ex)
         {
@@ -111,22 +105,21 @@ internal sealed class TrayAppContext : ApplicationContext
         _ = CheckForUpdatesAsync();
     }
 
-    // Both hotkeys are toggles: while a type is running EITHER one stops it;
-    // otherwise Ctrl+` types the bounded (128-char) clipboard and Ctrl+Shift+`
-    // types all of it. The target window keeps focus (the hotkey doesn't steal
-    // it the way opening the tray menu would), so no focus juggling is needed.
-    private async void OnHotkeyPressed(int id)
+    // Ctrl+` is a toggle: while a type is running it STOPS it; otherwise it
+    // types the whole clipboard. The target window keeps focus (the hotkey
+    // doesn't steal it the way opening the tray menu would), so no focus
+    // juggling is needed.
+    private async void OnHotkeyPressed()
     {
         if (_isTyping)
         {
             StopTyping();
             return;
         }
-        bool unlimited = id == AppInfo.HotkeyIdUnlimited;
-        await TypeClipboardAsync(unlimited);
+        await TypeClipboardAsync();
     }
 
-    private async Task TypeClipboardAsync(bool unlimited)
+    private async Task TypeClipboardAsync()
     {
         // One type at a time - overlapping runs would interleave keystrokes.
         if (_isTyping) return;
@@ -155,23 +148,9 @@ internal sealed class TrayAppContext : ApplicationContext
                 return;
             }
 
-            bool willTruncate = !unlimited && text.Length > AppInfo.MaxTypeLength;
-            string toType = willTruncate ? TruncateWithoutSplittingSurrogatePair(text, AppInfo.MaxTypeLength) : text;
-
-            // Fire the truncation notice first (non-blocking), then start typing
-            // right away. Typing is deliberately paced, not instantaneous - fast,
-            // but visibly "typing" rather than an indistinguishable-from-paste
-            // flash. Ctrl+Shift+` (unlimited) skips truncation entirely.
-            if (willTruncate)
-            {
-                _trayIcon.ShowBalloonTip(
-                    4000,
-                    "pype - text truncated",
-                    $"Clipboard held {text.Length} characters; only the first {toType.Length} were typed. Press Ctrl+Shift+` for all of it.",
-                    ToolTipIcon.Warning);
-            }
-
-            bool ok = await ClipboardTyper.TypeAsync(toType, token);
+            // Typing is deliberately paced, not instantaneous - fast, but
+            // visibly "typing" rather than an indistinguishable-from-paste flash.
+            bool ok = await ClipboardTyper.TypeAsync(text, token);
             if (!ok && !token.IsCancellationRequested)
             {
                 _trayIcon.ShowBalloonTip(
@@ -227,16 +206,6 @@ internal sealed class TrayAppContext : ApplicationContext
         return System.Drawing.SystemIcons.Application;
     }
 
-    private static string TruncateWithoutSplittingSurrogatePair(string text, int maxLength)
-    {
-        int length = maxLength;
-        if (length > 0 && length < text.Length && char.IsHighSurrogate(text[length - 1]))
-        {
-            length--;
-        }
-        return text[..length];
-    }
-
     private void ToggleRunAtLogin()
     {
         bool enable = !AutoStartManager.IsEnabled();
@@ -290,10 +259,9 @@ internal sealed class TrayAppContext : ApplicationContext
         ShowInfoWithLink(
             caption: "About pype",
             heading: $"{AppInfo.DisplayName} {UpdateChecker.LocalVersionString}",
-            body: "Press Ctrl+` anywhere to type the clipboard's text content.\n" +
-                  $"Text over {AppInfo.MaxTypeLength} characters is truncated; press Ctrl+Shift+`\n" +
-                  "to type all of it. Press the same shortcut again to stop a\n" +
-                  "type in progress.",
+            body: "Press Ctrl+` anywhere to type the clipboard's text content\n" +
+                  "wherever your cursor is. Press the same shortcut again to stop\n" +
+                  "a type in progress.",
             url: AppInfo.RepoUrl);
     }
 

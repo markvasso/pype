@@ -24,10 +24,9 @@ internal static class ClipboardTyper
     };
 
     /// <param name="cancellationToken">
-    /// Cancels an in-progress type (e.g. the tray "Stop Typing" item). On
+    /// Cancels an in-progress type (pressing the Ctrl+` hotkey again). On
     /// cancellation the loop stops cleanly between characters — matters most
-    /// for the unbounded "Type Clipboard — No Limit" action, which can run for
-    /// a long time.
+    /// for a large clipboard, which can take a while to type.
     /// </param>
     /// <returns>
     /// True if every input event was accepted by SendInput. False on a partial
