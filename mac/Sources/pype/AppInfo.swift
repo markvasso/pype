@@ -19,7 +19,7 @@ enum AppInfo {
 
     /// Delay before typing when triggered from the menu, to let focus return
     /// to the target window after the menu closes so the first characters don't
-    /// land on the menu itself. The Cmd+Shift+V hotkey path skips this — the
+    /// land on the menu itself. The Cmd+` hotkey path skips this — the
     /// target window already has focus.
     static let menuTypeFocusDelayNanoseconds: UInt64 = 350_000_000 // 350ms
 

@@ -6,10 +6,10 @@ import ApplicationServices
 
 /// Menu bar item + menu — the macOS equivalent of the Windows tray icon.
 ///
-/// Typing can be triggered either by the global Cmd+Shift+V hotkey (the
-/// Mac-native counterpart of the Windows build's Ctrl+Shift+V) or from this
-/// menu. Only the keystroke *injection* in ClipboardTyper needs Accessibility
-/// permission — hotkey *detection* (Carbon RegisterEventHotKey) needs none.
+/// Typing can be triggered either by the global Cmd+` hotkey (the Mac-native
+/// counterpart of the Windows build's Ctrl+`) or from this menu. Only the
+/// keystroke *injection* in ClipboardTyper needs Accessibility permission —
+/// hotkey *detection* (Carbon RegisterEventHotKey) needs none.
 ///
 /// Because these builds aren't Developer ID signed, the Accessibility grant
 /// doesn't survive an update (the new build has a different code identity), so
@@ -49,7 +49,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             // Handle clicks ourselves instead of assigning statusItem.menu
             // permanently: while a type runs a click must STOP it (not open the
             // menu), and otherwise it should open the menu. statusItemClicked
-            // decides which, and pops the menu with NSMenu.popUp when needed.
+            // decides which, assigning the menu transiently when it needs to
+            // open (see there).
             button.target = self
             button.action = #selector(statusItemClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -58,7 +59,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.delegate = self
 
         // Primary action: type the clipboard (bounded to 128 characters),
-        // same as the Cmd+Shift+V hotkey.
+        // same as the Cmd+` hotkey.
         typeItem.title = "Type Clipboard"
         typeItem.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Type clipboard")
         typeItem.action = #selector(typeClipboard(_:))
@@ -114,12 +115,12 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
 
-        // HotkeyManager's callback fires from a synchronous Carbon C callback,
-        // which can't itself be async - hop to the main actor. The hotkey is a
-        // toggle: while a type runs it STOPS it (the low-friction way out of a
-        // long "No Limit" run — reaching the menu mid-type is awkward), and
-        // otherwise it starts a bounded, non-menu type. It never triggers the
-        // unbounded "No Limit" variant.
+        // HotkeyManager's callback (Cmd+`) fires from a synchronous Carbon C
+        // callback, which can't itself be async - hop to the main actor. The
+        // hotkey is a toggle: while a type runs it STOPS it (the low-friction
+        // way out of a long "No Limit" run — reaching the menu mid-type is
+        // awkward), and otherwise it starts a bounded, non-menu type. It never
+        // triggers the unbounded "No Limit" variant.
         hotkeyManager.onHotkey = { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -133,7 +134,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         if !hotkeyManager.register() {
             NotificationManager.show(
                 title: "pype",
-                body: "Could not register the Cmd+Shift+V hotkey. It may already be in use by another app. You can still type from the menu bar icon."
+                body: "Could not register the Cmd+` hotkey. It may already be in use by another app or by the macOS \"move focus to next window\" shortcut. You can still type from the menu bar icon."
             )
         }
     }
@@ -143,20 +144,22 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     // mid-type is awkward, since the injected keystrokes fight the menu for
     // focus). Otherwise it opens the menu.
     //
-    // We show the menu with popUp(...) rather than assigning statusItem.menu:
-    // a permanent statusItem.menu would auto-open on every click, defeating the
-    // click-to-stop behavior, and the assign-then-performClick workaround risks
-    // re-entering this handler. popUp is deterministic and can't recurse. The
-    // manual highlight gives the button the usual "pressed" look while open.
+    // The menu is assigned to statusItem only for this click and cleared in
+    // menuDidClose, so macOS positions it natively (right under the item, all
+    // items visible) - unlike popUp with manual coordinates, which mis-anchored
+    // the menu and scrolled the first item out of view. Clearing it afterward
+    // routes the next click back here, so a click can still choose stop vs open.
     @objc private func statusItemClicked() {
         if isTyping {
             stopTyping()
             return
         }
-        guard let button = statusItem.button else { return }
-        button.highlight(true)
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 5), in: button)
-        button.highlight(false)
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        statusItem.menu = nil
     }
 
     // Refreshes item state each time the menu opens. While a type is in
@@ -282,10 +285,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "\(AppInfo.displayName) \(AppInfo.version)"
         alert.informativeText = """
-            Press Cmd+Shift+V anywhere (or use "Type Clipboard" in this menu) to type the clipboard's text content.
+            Press Cmd+` anywhere (or use "Type Clipboard" in this menu) to type the clipboard's text content.
             Text over \(AppInfo.maxTypeLength) characters is truncated; "Type Clipboard — No Limit" types all of it.
 
-            To stop a type in progress: press Cmd+Shift+V again, click the menu bar icon, or use "Stop Typing".
+            To stop a type in progress: press Cmd+` again, click the menu bar icon, or use "Stop Typing".
             """
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")

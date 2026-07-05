@@ -30,6 +30,11 @@ internal sealed class TrayAppContext : ApplicationContext
     private System.Drawing.Icon? _ownedIcon;
     private bool _isTyping;
     private CancellationTokenSource? _typeCts;
+    // The window that had focus just before the tray menu was opened. Captured
+    // on tray mouse-down (before WinForms activates its own hidden window to
+    // show the menu) so a menu-invoked type can hand focus back to the app the
+    // user was actually in.
+    private IntPtr _lastForeground;
 
     public TrayAppContext()
     {
@@ -105,6 +110,20 @@ internal sealed class TrayAppContext : ApplicationContext
         };
         _trayIcon.ContextMenuStrip = menu;
 
+        // Capture the foreground window on mouse-DOWN, before the menu opens.
+        // Showing a NotifyIcon menu makes WinForms activate its own hidden
+        // window (so the menu dismisses correctly), which steals focus from the
+        // app the user was in. Mouse-down fires before that, so GetForegroundWindow
+        // here still returns the real target; a menu-invoked type restores it.
+        _trayIcon.MouseDown += (_, _) =>
+        {
+            IntPtr fg = NativeMethods.GetForegroundWindow();
+            if (fg != IntPtr.Zero && !IsOwnWindow(fg))
+            {
+                _lastForeground = fg;
+            }
+        };
+
         // A left-click on the tray icon while a type is running stops it - the
         // low-friction stop the user can hit without opening the menu (opening
         // it mid-type is awkward because the injected keystrokes fight the menu
@@ -120,12 +139,12 @@ internal sealed class TrayAppContext : ApplicationContext
         try
         {
             // MOD_NOREPEAT stops WM_HOTKEY from re-firing on OS-level key
-            // repeat while Ctrl+Shift+V is held - without it, holding the
-            // combo down would spam OnHotkeyPressed on its own, before
-            // _isTyping's re-entrancy guard even comes into play.
+            // repeat while Ctrl+` is held - without it, holding the combo down
+            // would spam OnHotkeyPressed on its own, before _isTyping's
+            // re-entrancy guard even comes into play.
             _hotkeyWindow.RegisterHotkey(
-                NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT | NativeMethods.MOD_NOREPEAT,
-                NativeMethods.VK_V,
+                NativeMethods.MOD_CONTROL | NativeMethods.MOD_NOREPEAT,
+                NativeMethods.VK_OEM_3,
                 AppInfo.HotkeyId);
         }
         catch (Exception ex)
@@ -178,10 +197,19 @@ internal sealed class TrayAppContext : ApplicationContext
 
         try
         {
-            // Triggered from the menu: let focus return to the target window
-            // after the menu closes before we start injecting keystrokes.
+            // Triggered from the menu: the menu stole focus to pype's own
+            // hidden window, and it does NOT return to the target app on its
+            // own. Explicitly re-activate the window the user was in (captured
+            // on tray mouse-down), then give it a moment to actually come
+            // forward before injecting keystrokes. pype is the foreground
+            // process at this point (it owns the just-closed menu), so
+            // SetForegroundWindow is allowed to hand focus back.
             if (fromMenu)
             {
+                if (_lastForeground != IntPtr.Zero)
+                {
+                    NativeMethods.SetForegroundWindow(_lastForeground);
+                }
                 await Task.Delay(MenuTypeFocusDelayMs, token);
             }
 
@@ -247,6 +275,15 @@ internal sealed class TrayAppContext : ApplicationContext
     }
 
     private void StopTyping() => _typeCts?.Cancel();
+
+    // True if the window belongs to pype's own process - used to skip pype's
+    // own windows when capturing the "return focus here" target, so opening the
+    // menu doesn't record pype itself as the app to type into.
+    private static bool IsOwnWindow(IntPtr hWnd)
+    {
+        NativeMethods.GetWindowThreadProcessId(hWnd, out uint pid);
+        return pid == (uint)Environment.ProcessId;
+    }
 
     private System.Drawing.Icon LoadAppIcon()
     {
@@ -355,10 +392,10 @@ internal sealed class TrayAppContext : ApplicationContext
         ShowInfoWithLink(
             caption: "About pype",
             heading: $"{AppInfo.DisplayName} {UpdateChecker.LocalVersionString}",
-            body: "Press Ctrl+Shift+V anywhere (or use \"Type Clipboard\" in this menu) to\n" +
+            body: "Press Ctrl+` anywhere (or use \"Type Clipboard\" in this menu) to\n" +
                   $"type the clipboard's text content. Text over {AppInfo.MaxTypeLength} characters is\n" +
                   "truncated; \"Type Clipboard — No Limit\" types all of it.\n\n" +
-                  "To stop a type in progress: press Ctrl+Shift+V again, left-click the\n" +
+                  "To stop a type in progress: press Ctrl+` again, left-click the\n" +
                   "tray icon, or use \"Stop Typing\".",
             url: AppInfo.RepoUrl);
     }

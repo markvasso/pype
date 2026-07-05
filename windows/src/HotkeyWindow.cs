@@ -31,7 +31,7 @@ internal sealed class HotkeyWindow : NativeWindow, IDisposable
         if (!NativeMethods.RegisterHotKey(Handle, id, modifiers, vk))
         {
             throw new InvalidOperationException(
-                "Could not register the Ctrl+Shift+V hotkey. It may already be in use by another application.");
+                "Could not register the Ctrl+` hotkey. It may already be in use by another application. You can still type from the tray menu.");
         }
         _registeredId = id;
     }

@@ -13,7 +13,11 @@ internal static class NativeMethods
     public const uint MOD_SHIFT = 0x0004;
     public const uint MOD_NOREPEAT = 0x4000;
 
-    public const uint VK_V = 0x56;
+    // VK_OEM_3 is the `/~ key (left of the "1" row on a US layout) - the
+    // backtick pype's hotkey uses. It's "OEM" because its physical position
+    // maps to different characters on non-US layouts, but the virtual-key code
+    // is stable, which is all RegisterHotKey needs.
+    public const uint VK_OEM_3 = 0xC0;
 
     public const uint INPUT_KEYBOARD = 1;
     public const uint KEYEVENTF_KEYUP = 0x0002;
@@ -27,6 +31,18 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    // Used to restore focus to the window the user was in before opening the
+    // tray menu (which makes pype's own hidden window foreground), so a
+    // menu-invoked type lands in the right place.
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct INPUT

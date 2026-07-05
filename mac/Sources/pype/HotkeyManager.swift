@@ -4,13 +4,11 @@
 import Carbon.HIToolbox
 import AppKit
 
-/// Registers Cmd+Shift+V as a global hotkey via Carbon's RegisterEventHotKey.
-/// Cmd (not Ctrl) is deliberate: it's the Mac-native equivalent of the
-/// Windows build's Ctrl+Shift+V, which was chosen there because Ctrl+Shift+V
-/// is the widely recognized "paste as plain text" shortcut in many Windows
-/// apps - the Mac apps that have an equivalent shortcut (e.g. Google Docs)
-/// use Cmd+Shift+V for the same thing, so this keeps the same semantic
-/// shortcut on each platform rather than a literal modifier-for-modifier copy.
+/// Registers Cmd+` (Command + backtick) as a global hotkey via Carbon's
+/// RegisterEventHotKey. Cmd (not Ctrl) mirrors the Windows build's Ctrl+`;
+/// backtick was chosen because it rarely collides with app shortcuts. Note
+/// macOS assigns Cmd+` to "move focus to next window" system-wide, so if that
+/// system shortcut is enabled this registration may not win — see the README.
 ///
 /// This (still fully supported, not deprecated) API is used deliberately
 /// instead of a CGEventTap or NSEvent global monitor: those require the
@@ -29,7 +27,7 @@ final class HotkeyManager {
     var onHotkey: (() -> Void)?
 
     /// True if the hotkey was registered successfully. False most commonly
-    /// means another app already claimed Cmd+Shift+V.
+    /// means another app or the system already claimed Cmd+`.
     @discardableResult
     func register() -> Bool {
         var eventType = EventTypeSpec(
@@ -61,15 +59,15 @@ final class HotkeyManager {
         guard installStatus == noErr else { return false }
 
         let hotKeyID = EventHotKeyID(signature: Self.signature, id: Self.hotKeyID)
-        let modifiers = UInt32(cmdKey | shiftKey)
-        let keyCode = UInt32(kVK_ANSI_V)
+        let modifiers = UInt32(cmdKey)
+        let keyCode = UInt32(kVK_ANSI_Grave)
 
         let registerStatus = RegisterEventHotKey(
             keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef
         )
         guard registerStatus == noErr else {
             // InstallEventHandler succeeded above but the hotkey itself
-            // didn't (most commonly: another app already owns Cmd+Shift+V)
+            // didn't (most commonly: another app or the system already owns Cmd+`)
             // - these are two independent Carbon calls with no automatic
             // rollback, so without this the event handler installed above
             // would otherwise leak for the rest of the process's lifetime.

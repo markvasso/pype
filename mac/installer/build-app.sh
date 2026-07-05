@@ -30,7 +30,15 @@ echo "Building pype (release)..."
 (cd "$MAC_DIR" && swift build -c release -Xswiftc -gnone)
 
 echo "Assembling pype.app..."
-rm -rf "$APP_DIR"
+# A prior `sudo installer` test can leave a root-owned dist/pype.app that this
+# (non-root) build can't rm. dist/ itself is user-owned, so if rm can't clear
+# the bundle, rename it aside with a unique name (a pure rename needs write only
+# on dist/) and carry on. Delete the .trash-* dirs later with sudo.
+rm -rf "$APP_DIR" 2>/dev/null || true
+if [ -e "$APP_DIR" ]; then
+    mv "$APP_DIR" "$DIST_DIR/.trash-pype-app-$$" \
+        && echo "Note: could not remove an existing (root-owned?) $APP_DIR; renamed it aside to .trash-pype-app-$$ (delete with sudo)."
+fi
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
 cp "$BUILD_DIR/pype" "$APP_DIR/Contents/MacOS/pype"

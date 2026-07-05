@@ -3,12 +3,14 @@
 A menu bar port of [pype](../README.md) (see the [Windows
 README](../windows/README.md) for the full project background — that's
 where this project started). Same behavior as the Windows version: press
-**Cmd+Shift+V** anywhere to type the clipboard's text content, or use the
+**Cmd+`** anywhere to type the clipboard's text content, or use the
 menu bar icon (**Type Clipboard**). Text over 128 characters is truncated with
-a notice; **Type Clipboard — No Limit** types all of it. Cmd (not Ctrl, despite
-the Windows version using Ctrl+Shift+V) is deliberate: it's the Mac-native
-equivalent of the same "paste as plain text" shortcut convention (e.g. Google
-Docs uses Cmd+Shift+V on Mac for what Ctrl+Shift+V does on Windows).
+a notice; **Type Clipboard — No Limit** types all of it. The backtick key was
+chosen because it rarely collides with app shortcuts; Cmd (rather than the
+Windows build's Ctrl) is just the Mac-native primary modifier. Note macOS
+assigns Cmd+` to "move focus to next window" system-wide — if that system
+shortcut is enabled it may take precedence, in which case use the menu (or
+disable it under System Settings > Keyboard > Keyboard Shortcuts).
 
 The one real platform difference is Accessibility permission — keystroke
 injection needs it, and on these unsigned builds the grant doesn't survive
@@ -150,7 +152,7 @@ LaunchAgent plist file — `SMAppService.mainApp` manages that internally).
 ## Usage
 
 Copy any text to the clipboard, click wherever you want it typed, then press
-**Cmd+Shift+V** — or use the menu bar menu:
+**Cmd+`** — or use the menu bar menu:
 
 - **Type Clipboard** — types the clipboard's text, truncated to
   128 characters (with a notice) if longer. Same as the hotkey, but from the
@@ -166,7 +168,7 @@ done three ways — trying to open the menu and click "Stop Typing" mid-type is
 awkward, because the keystrokes being injected fight the menu for focus, so
 there are two faster options:
 
-- **Press Cmd+Shift+V again** — the hotkey is a toggle: it stops a running type
+- **Press Cmd+` again** — the hotkey is a toggle: it stops a running type
   instead of starting a new one.
 - **Click the menu bar icon** — a single click stops a running type (it opens
   the menu as usual when nothing is being typed).
@@ -201,7 +203,7 @@ in System Settings), and a `postinstall` edge case where installing at the
 login screen (`/dev/console` reporting `loginwindow`, not a real user) would
 have tried to launch the app as that system account.
 
-What wasn't tested end-to-end: actually pressing **Cmd+Shift+V** (or choosing
+What wasn't tested end-to-end: actually pressing **Cmd+`** (or choosing
 **Type Clipboard**) after granting Accessibility permission and confirming text
 types into a real target app — that needs an interactive permission grant this
 environment didn't have a way to click through (screen-recording/computer-use
@@ -209,9 +211,10 @@ access was offered and declined). Worth a real test before relying on it.
 
 ## Known limitations
 
-- **One hotkey**: Cmd+Shift+V is fixed, not configurable (Windows' equivalent
-  is Ctrl+Shift+V — see the intro for why they differ). "Type Clipboard — No
-  Limit" is menu-only by design and intentionally has no shortcut.
+- **One hotkey**: Cmd+` is fixed, not configurable (Windows' equivalent is
+  Ctrl+`). It can also collide with the macOS "move focus to next window"
+  shortcut — see the intro. "Type Clipboard — No Limit" is menu-only by design
+  and intentionally has no shortcut.
 - **Plain text only**: reads whatever `NSPasteboard.general.string(forType:
   .string)` returns.
 - **macOS 13+ only**: `SMAppService` (Run at Login) requires Ventura or

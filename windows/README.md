@@ -1,7 +1,7 @@
 # pype
 
 Types the current clipboard's text content wherever your cursor is, triggered
-by **Ctrl+Shift+V**. If the clipboard text is longer than 128 characters, pype
+by **Ctrl+`**. If the clipboard text is longer than 128 characters, pype
 types only the first 128 and shows a tray notification explaining why it was
 truncated.
 
@@ -25,16 +25,19 @@ Manager.
 
 ## How it works
 
-- `RegisterHotKey` (Win32) registers Ctrl+Shift+V against a hidden
+- `RegisterHotKey` (Win32) registers Ctrl+` against a hidden
   message-only window — no taskbar/Alt+Tab presence. The same typing action
   is also available as **"Type Clipboard"** (with a clipboard icon) in the tray
-  right-click menu (it waits ~350ms for focus to return to your target window
-  before typing).
+  right-click menu. Opening that menu makes pype's own hidden window the
+  foreground one, so before typing, the menu path re-activates the window you
+  were in (captured on tray mouse-down) and waits ~350ms for it to come
+  forward — otherwise the first keystrokes would land nowhere until you clicked
+  back into your app.
 - **"Type Clipboard — No Limit"** in the tray menu types the *entire* clipboard
   with no 128-character cap. It's deliberately menu-only and **never bound to
   the hotkey**, so injecting an unbounded amount of text is always an explicit,
   deliberate choice rather than something a keystroke could trigger.
-- **Stopping a type in progress** can be done three ways: press **Ctrl+Shift+V
+- **Stopping a type in progress** can be done three ways: press **Ctrl+`
   again** (the hotkey toggles — it stops a running type instead of starting a
   new one), **left-click the tray icon**, or use **"Stop Typing"** in the menu.
   The first two exist because opening the menu mid-type is awkward — the
@@ -318,7 +321,7 @@ each user to enable — if you need every user's pype to autostart, set the
 ## Usage
 
 Copy any text to the clipboard, place your cursor wherever you want it typed,
-then press **Ctrl+Shift+V** — or right-click the tray icon and choose **Type
+then press **Ctrl+`** — or right-click the tray icon and choose **Type
 Clipboard**. To type more than 128 characters, use **Type Clipboard — No
 Limit** (menu only, never the hotkey). The tray menu also has About, "Run at
 Login" (see [How it works](#how-it-works)), and Exit.
@@ -328,7 +331,7 @@ done three ways — opening the menu to click "Stop Typing" mid-type is awkward,
 since the keystrokes being injected fight the menu for focus, so there are two
 faster options:
 
-- **Press Ctrl+Shift+V again** — the hotkey is a toggle: it stops a running
+- **Press Ctrl+` again** — the hotkey is a toggle: it stops a running
   type instead of starting a new one.
 - **Left-click the tray icon** — a single left-click stops a running type.
   (Right-click still opens the menu, which also has Stop Typing.)
@@ -344,7 +347,7 @@ faster options:
 - **Plain text only**: reads whatever `Clipboard.GetText()` returns; rich
   text, images, or files on the clipboard are ignored (nothing is typed, with
   a tray notice if there's no text at all).
-- **One hotkey**: Ctrl+Shift+V is fixed, not currently configurable. If
+- **One hotkey**: Ctrl+` is fixed, not currently configurable. If
   another app has already claimed that combination, pype shows a tray error
   on startup instead of silently failing.
 - **Switching scopes**: installing `Machine`-scope on a machine that already

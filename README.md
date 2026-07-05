@@ -1,13 +1,13 @@
 # pype
 
 Types the current clipboard's text content wherever your cursor is, triggered
-by a hotkey — **Ctrl+Shift+V** on Windows, **Cmd+Shift+V** on macOS (each
-platform's native equivalent of the same "paste as plain text" convention) —
-or from the tray / menu-bar menu. If the clipboard text is longer than 128
-characters, pype types only the first 128 and shows a notification explaining
-why it was truncated — or use **Type Clipboard — No Limit** to type all of it.
-Typing is deliberately paced rather than instantaneous, so it's visibly pype
-(not a native paste) doing it.
+by a hotkey — **Ctrl+`** on Windows, **Cmd+`** on macOS (the backtick key,
+chosen because it rarely collides with other apps' shortcuts) — or from the
+tray / menu-bar menu. If the clipboard text is longer than 128 characters, pype
+types only the first 128 and shows a notification explaining why it was
+truncated — or use **Type Clipboard — No Limit** to type all of it. Typing is
+deliberately paced rather than instantaneous, so it's visibly pype (not a
+native paste) doing it.
 
 ## Use case
 
@@ -28,7 +28,7 @@ manager — one hotkey, one job.
 ## Features
 
 - **Type Clipboard** — types the clipboard's text content into whatever has
-  focus, via the hotkey (**Ctrl+Shift+V** on Windows, **Cmd+Shift+V** on macOS)
+  focus, via the hotkey (**Ctrl+`** on Windows, **Cmd+`** on macOS)
   or the tray/menu-bar menu.
 - **Type Clipboard — No Limit** types the entire clipboard past the 128-char
   cap. It's menu-only and never bound to a shortcut, so dumping a large blob of
@@ -83,7 +83,7 @@ for build, install, and usage instructions:
   and GUI (NSIS) installers, `Run`-key autostart (visible in Task Manager),
   registry integration for RMM/patch-management tools.
 - **[macOS](mac/README.md)** — Swift/AppKit menu bar app. `.pkg` installer or
-  portable `.zip`, `SMAppService` autostart, Cmd+Shift+V via Carbon
+  portable `.zip`, `SMAppService` autostart, Cmd+` via Carbon
   `RegisterEventHotKey`. Keystroke injection needs Accessibility permission,
   and because these builds aren't Developer ID signed that grant doesn't
   survive updates — so the menu carries a live status item and step-by-step

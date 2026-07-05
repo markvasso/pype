@@ -38,10 +38,10 @@ internal static class ClipboardTyper
     {
         if (string.IsNullOrEmpty(text)) return true;
 
-        // The trigger can be Ctrl+Shift+V, which RegisterHotKey can fire while
-        // those keys are still physically held. Some apps read modifier state
-        // (not just the WM_CHAR stream) and would swallow the injected text as
-        // a shortcut, so force the modifiers up before typing anything.
+        // The trigger can be Ctrl+`, which RegisterHotKey can fire while those
+        // keys are still physically held. Some apps read modifier state (not
+        // just the WM_CHAR stream) and would swallow the injected text as a
+        // shortcut, so force the modifiers up before typing anything.
         ReleaseModifierKeys();
 
         // Normalize all line-ending styles (CRLF, lone CR, lone LF) to a single

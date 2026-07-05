@@ -30,7 +30,7 @@ Unicode true
 ; to pull this from the exe at NSIS compile time. Bump this by hand
 ; alongside <Version> in ../src/Pype.csproj when you cut a new release.
 !define PRODUCT_NAME "pype"
-!define PRODUCT_VERSION "1.2.1"
+!define PRODUCT_VERSION "1.2.2"
 !define PRODUCT_PUBLISHER "pype"
 
 ; --- MultiUser: gives the wizard an "Install for all users" / "Install for
