@@ -2,17 +2,19 @@
 
 A menu bar port of [pype](../README.md) (see the [Windows
 README](../windows/README.md) for the full project background — that's
-where this project started). Click the menu bar icon and choose **Type
-Clipboard** to type the clipboard's text content wherever your cursor is
-(text over 128 characters is truncated, with a notice), or **Type Clipboard —
-No Limit** to type all of it.
+where this project started). Same behavior as the Windows version: press
+**Cmd+Shift+V** anywhere to type the clipboard's text content, or use the
+menu bar icon (**Type Clipboard**). Text over 128 characters is truncated with
+a notice; **Type Clipboard — No Limit** types all of it. Cmd (not Ctrl, despite
+the Windows version using Ctrl+Shift+V) is deliberate: it's the Mac-native
+equivalent of the same "paste as plain text" shortcut convention (e.g. Google
+Docs uses Cmd+Shift+V on Mac for what Ctrl+Shift+V does on Windows).
 
-**The macOS build deliberately works differently from Windows: there is no
-global keyboard shortcut, and pype never prompts for Accessibility.** Because
-these builds aren't Developer ID signed, the Accessibility grant doesn't
-survive updates (see below), so a global hotkey that silently does nothing and
-a prompt that misleads would both do more harm than good. Typing is invoked
-from the menu; you grant Accessibility yourself when you want it to work.
+The one real platform difference is Accessibility permission — keystroke
+injection needs it, and on these unsigned builds the grant doesn't survive
+updates. pype gives you a live status item and step-by-step guidance (including
+the post-update fix) rather than leaving you guessing; see
+[Permissions](#permissions-the-one-real-platform-difference) below.
 
 This is a **separate implementation**, not a port of the C# codebase — none
 of the Windows-specific mechanisms (WinForms, Win32 P/Invoke, the registry)
@@ -21,21 +23,26 @@ equivalent:
 
 | Windows | macOS |
 |---|---|
+| `RegisterHotKey` | Carbon `RegisterEventHotKey` (still fully supported; deliberately *not* a CGEventTap/NSEvent global monitor — those need Input Monitoring permission just to detect a hotkey, this needs none) |
 | `SendInput` / `KEYEVENTF_UNICODE` | `CGEvent` + `keyboardSetUnicodeString` |
 | `Clipboard.GetText()` | `NSPasteboard.general` |
 | System tray `NotifyIcon` | Menu bar `NSStatusItem` |
 | Balloon tip | `UNUserNotificationCenter` |
 | `Run`-key autostart | `SMAppService.mainApp` (macOS 13+) |
 | PowerShell installer / NSIS | `.pkg` via `pkgbuild`, silent-installable via `installer -pkg ... -target /` |
-| Global hotkey (`RegisterHotKey`) | *(none — menu-only, see above)* |
 
-## Permissions
+## Permissions (the one real platform difference)
 
 - **Accessibility** (System Settings > Privacy & Security > Accessibility):
-  required for `ClipboardTyper` to inject keystrokes. pype does **not** prompt
-  for it — add pype to the Accessibility list yourself. If you invoke a type
-  without it granted, pype posts a single informational notice (not a system
-  prompt) and does nothing.
+  required for `ClipboardTyper` to inject keystrokes. The menu bar item shows
+  live status ("Accessibility Access: Granted" or "Grant Accessibility
+  Access…"); the latter opens a guide with the exact steps — including how to
+  fix the common post-update case where pype is already listed but still can't
+  type (remove the stale entry with `−` and re-add this copy with `+`), and a
+  button that opens the Accessibility pane directly. If you trigger a type
+  without the permission, pype shows that same guidance **once** (not on every
+  keypress) and does nothing else. Hotkey *detection* itself
+  (`RegisterEventHotKey`) needs no permission — same as Windows for that part.
 - **Notifications**: requested on first launch for the truncation/error
   notices. If declined, those notices are silently dropped (logged via
   `os.log` instead) rather than blocking typing.
@@ -142,23 +149,23 @@ LaunchAgent plist file — `SMAppService.mainApp` manages that internally).
 
 ## Usage
 
-Copy any text to the clipboard, click wherever you want it typed, then open the
-menu bar menu and choose one of:
+Copy any text to the clipboard, click wherever you want it typed, then press
+**Cmd+Shift+V** — or use the menu bar menu:
 
 - **Type Clipboard** — types the clipboard's text, truncated to
-  128 characters (with a notice) if longer. It waits a moment for focus to
-  return to your target window after the menu closes.
+  128 characters (with a notice) if longer. Same as the hotkey, but from the
+  menu it waits a moment for focus to return to your target window after the
+  menu closes.
 - **Type Clipboard — No Limit** — types the *entire* clipboard, no cap.
-  Deliberately menu-only and never bound to a shortcut, so injecting an
+  Deliberately menu-only and **never bound to the hotkey**, so injecting an
   unbounded blob of text is always an explicit, deliberate action.
 - **Stop Typing** — cancels an in-progress type cleanly (pype keeps running).
   Only enabled while typing; the type actions and Quit are disabled until the
   current type finishes or is stopped.
 
-There is **no global keyboard shortcut** on macOS (see the intro for why).
-The menu also has About (which links to the GitHub page), a "Run at Login"
-toggle (checkmark when active), a "Check for updates on startup" toggle, and
-Quit.
+The menu also has About (which links to the GitHub page), the Accessibility
+status / "Grant Accessibility Access…" item, a "Run at Login" toggle (checkmark
+when active), a "Check for updates on startup" toggle, and Quit.
 
 ## Update check
 
@@ -185,16 +192,17 @@ in System Settings), and a `postinstall` edge case where installing at the
 login screen (`/dev/console` reporting `loginwindow`, not a real user) would
 have tried to launch the app as that system account.
 
-What wasn't tested end-to-end: actually choosing **Type Clipboard** after
-granting Accessibility permission and confirming text types into a real target
-app — that needs an interactive permission grant this environment didn't have a
-way to click through (screen-recording/computer-use access was offered and
-declined). Worth a real test before relying on it.
+What wasn't tested end-to-end: actually pressing **Cmd+Shift+V** (or choosing
+**Type Clipboard**) after granting Accessibility permission and confirming text
+types into a real target app — that needs an interactive permission grant this
+environment didn't have a way to click through (screen-recording/computer-use
+access was offered and declined). Worth a real test before relying on it.
 
 ## Known limitations
 
-- **Menu-only, no global shortcut**: unlike the Windows build (Ctrl+Shift+V),
-  macOS invokes typing only from the menu bar menu — see the intro for why.
+- **One hotkey**: Cmd+Shift+V is fixed, not configurable (Windows' equivalent
+  is Ctrl+Shift+V — see the intro for why they differ). "Type Clipboard — No
+  Limit" is menu-only by design and intentionally has no shortcut.
 - **Plain text only**: reads whatever `NSPasteboard.general.string(forType:
   .string)` returns.
 - **macOS 13+ only**: `SMAppService` (Run at Login) requires Ventura or

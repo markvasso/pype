@@ -6,25 +6,30 @@ import ApplicationServices
 
 /// Menu bar item + menu — the macOS equivalent of the Windows tray icon.
 ///
-/// Unlike the Windows build, macOS has NO global hotkey and does NOT prompt
-/// for Accessibility. That's a deliberate platform difference: because these
-/// builds aren't Developer ID signed, the Accessibility grant doesn't survive
-/// updates, so a proactive prompt would mislead more than help. Typing is
-/// invoked purely from this menu; the user grants Accessibility themselves in
-/// System Settings if/when they want it to work.
+/// Typing can be triggered either by the global Cmd+Shift+V hotkey (the
+/// Mac-native counterpart of the Windows build's Ctrl+Shift+V) or from this
+/// menu. Only the keystroke *injection* in ClipboardTyper needs Accessibility
+/// permission — hotkey *detection* (Carbon RegisterEventHotKey) needs none.
+///
+/// Because these builds aren't Developer ID signed, the Accessibility grant
+/// doesn't survive an update (the new build has a different code identity), so
+/// the menu keeps a live "Grant Accessibility Access…" affordance and the
+/// guidance spells out how to remove the stale entry and re-add this copy.
 @MainActor
 final class StatusBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
+    private let hotkeyManager = HotkeyManager()
     private let typeItem = NSMenuItem()
     private let typeUnlimitedItem = NSMenuItem()
     private let stopItem = NSMenuItem()
+    private let accessibilityItem = NSMenuItem()
     private let runAtLoginItem = NSMenuItem()
     private let updateCheckItem = NSMenuItem()
     private let quitItem = NSMenuItem()
     private var isTyping = false
     private var typingTask: Task<Void, Never>?
     // Shows the "needs Accessibility" notice at most once per not-granted
-    // episode instead of on every attempt; reset once trust is observed.
+    // episode instead of on every hotkey press; reset once trust is observed.
     private var hasWarnedNoAccessibility = false
 
     override init() {
@@ -45,7 +50,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let menu = NSMenu()
         menu.delegate = self
 
-        // Primary action: type the clipboard (bounded to 128 characters).
+        // Primary action: type the clipboard (bounded to 128 characters),
+        // same as the Cmd+Shift+V hotkey.
         typeItem.title = "Type Clipboard"
         typeItem.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Type clipboard")
         typeItem.action = #selector(typeClipboard(_:))
@@ -53,7 +59,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(typeItem)
 
         // Types the ENTIRE clipboard, no 128-char cap. Deliberately menu-only
-        // (never a hotkey) so injecting an unbounded clipboard is always an
+        // (never the hotkey) so injecting an unbounded clipboard is always an
         // explicit, deliberate action.
         typeUnlimitedItem.title = "Type Clipboard — No Limit"
         typeUnlimitedItem.image = NSImage(systemSymbolName: "list.clipboard", accessibilityDescription: "Type entire clipboard")
@@ -74,6 +80,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        // Accessibility status/affordance. Its title and enabled state are set
+        // live in menuWillOpen (AXIsProcessTrusted is a fast local call, safe
+        // to query synchronously as the menu opens). Gives the user a
+        // persistent, non-spammy way to see whether pype can actually type and
+        // to jump straight to the setup + troubleshooting guidance.
+        accessibilityItem.action = #selector(grantAccessibility)
+        accessibilityItem.target = self
+        menu.addItem(accessibilityItem)
+
         runAtLoginItem.title = "Run at Login"
         runAtLoginItem.action = #selector(toggleRunAtLogin)
         runAtLoginItem.target = self
@@ -93,11 +108,26 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(quitItem)
 
         statusItem.menu = menu
+
+        // HotkeyManager's callback fires from a synchronous Carbon C callback,
+        // which can't itself be async - hop to the main actor and start a
+        // (bounded, non-menu) type. The hotkey never triggers the unbounded
+        // "No Limit" variant.
+        hotkeyManager.onHotkey = { [weak self] in
+            Task { @MainActor in self?.startTyping(unlimited: false, fromMenu: false) }
+        }
+        if !hotkeyManager.register() {
+            NotificationManager.show(
+                title: "pype",
+                body: "Could not register the Cmd+Shift+V hotkey. It may already be in use by another app. You can still type from the menu bar icon."
+            )
+        }
     }
 
     // Refreshes item state each time the menu opens. While a type is in
     // progress the only enabled action is Stop Typing, so a long "no limit"
-    // type can't be interrupted halfway by another action.
+    // type can't be interrupted halfway by another action. Also reflects live
+    // Accessibility status.
     func menuWillOpen(_ menu: NSMenu) {
         typeItem.isEnabled = !isTyping
         typeUnlimitedItem.isEnabled = !isTyping
@@ -107,17 +137,28 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         updateCheckItem.isEnabled = !isTyping
         runAtLoginItem.state = AutoStartManager.isEnabled ? .on : .off
         updateCheckItem.state = Settings.checkForUpdatesOnStartup ? .on : .off
+
+        if AXIsProcessTrusted() {
+            accessibilityItem.title = "Accessibility Access: Granted"
+            accessibilityItem.state = .on
+            accessibilityItem.isEnabled = false
+            hasWarnedNoAccessibility = false
+        } else {
+            accessibilityItem.title = "Grant Accessibility Access…"
+            accessibilityItem.state = .off
+            accessibilityItem.isEnabled = !isTyping
+        }
     }
 
     @objc private func typeClipboard(_ sender: Any?) {
-        startTyping(unlimited: false)
+        startTyping(unlimited: false, fromMenu: true)
     }
 
     @objc private func typeClipboardUnlimited(_ sender: Any?) {
-        startTyping(unlimited: true)
+        startTyping(unlimited: true, fromMenu: true)
     }
 
-    private func startTyping(unlimited: Bool) {
+    private func startTyping(unlimited: Bool, fromMenu: Bool) {
         // Set isTyping synchronously here, on the main actor, BEFORE launching
         // the task - not inside performTyping. If it were only set inside the
         // (asynchronously-scheduled) task, two rapid triggers could both pass
@@ -125,7 +166,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         // the wrong task. Setting it here makes the check-and-set atomic.
         guard !isTyping else { return }
         isTyping = true
-        typingTask = Task { await performTyping(unlimited: unlimited) }
+        typingTask = Task { await performTyping(unlimited: unlimited, fromMenu: fromMenu) }
     }
 
     @objc private func stopTyping() {
@@ -135,6 +176,49 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     @objc private func toggleUpdateCheck() {
         Settings.checkForUpdatesOnStartup.toggle()
         updateCheckItem.state = Settings.checkForUpdatesOnStartup ? .on : .off
+    }
+
+    @objc private func grantAccessibility() {
+        showAccessibilityHelp()
+    }
+
+    // Opens the Accessibility settings pane directly.
+    private func openAccessibilitySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// The Accessibility "prompt": a modal that explains how to grant the
+    /// permission AND — crucially for these unsigned builds — how to fix the
+    /// common post-update case where pype is already listed but still can't
+    /// type. Shown from the menu item and from a failed type (once per
+    /// not-granted episode).
+    private func showAccessibilityHelp() {
+        let alert = NSAlert()
+        alert.messageText = "Allow pype to type"
+        alert.informativeText = """
+            pype needs Accessibility permission to type into other apps. Open \
+            System Settings ▸ Privacy & Security ▸ Accessibility, then:
+
+            • If pype isn't listed, click +, choose this copy of pype.app, and \
+            turn it on.
+
+            • If pype IS listed but still can't type — this normally happens \
+            right after updating pype, because the new version has a different \
+            identity than the one macOS remembers — select the existing pype \
+            entry, click − to remove it, then click + and add this copy of \
+            pype.app again, and turn it on.
+
+            Quit and reopen pype after granting access.
+            """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Open Accessibility Settings")
+        alert.addButton(withTitle: "Close")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            openAccessibilitySettings()
+        }
     }
 
     @objc private func toggleRunAtLogin() {
@@ -163,7 +247,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "\(AppInfo.displayName) \(AppInfo.version)"
         alert.informativeText = """
-            Use "Type Clipboard" in this menu to type the clipboard's text content.
+            Press Cmd+Shift+V anywhere (or use "Type Clipboard" in this menu) to type the clipboard's text content.
             Text over \(AppInfo.maxTypeLength) characters is truncated; "Type Clipboard — No Limit" types all of it.
             """
         alert.alertStyle = .informational
@@ -201,7 +285,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         NSApp.terminate(nil)
     }
 
-    private func performTyping(unlimited: Bool) async {
+    private func performTyping(unlimited: Bool, fromMenu: Bool) async {
         // isTyping was set by startTyping (synchronously, on the main actor)
         // before this task was launched, so the single-run guarantee holds;
         // this just clears it when the run finishes, however it exits.
@@ -212,17 +296,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             return
         }
 
-        // Check Accessibility up front. macOS gates keystroke injection behind
-        // it; without it CGEvents are silently dropped. We don't prompt (see
-        // the type note above) - just inform, once, so a user isn't left
-        // wondering why nothing typed.
+        // Check Accessibility up front — macOS gates keystroke injection behind
+        // it and silently drops CGEvents without it. Show the full setup +
+        // troubleshooting guidance once per not-granted episode (firing on
+        // every hotkey press would be a barrage). hasWarnedNoAccessibility
+        // resets once trust is regained (below and in menuWillOpen), so a later
+        // loss of the grant — e.g. after an update — re-notifies.
         guard AXIsProcessTrusted() else {
             if !hasWarnedNoAccessibility {
                 hasWarnedNoAccessibility = true
-                NotificationManager.show(
-                    title: "pype",
-                    body: "pype needs Accessibility permission to type. Add pype under System Settings > Privacy & Security > Accessibility, then try again."
-                )
+                showAccessibilityHelp()
             }
             return
         }
@@ -243,12 +326,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             )
         }
 
-        // Let focus return to the target window after the menu closes before
-        // injecting keystrokes, so the first characters don't land on the menu.
-        do {
-            try await Task.sleep(nanoseconds: AppInfo.menuTypeFocusDelayNanoseconds)
-        } catch {
-            return // cancelled during the focus delay
+        // Triggered from the menu: let focus return to the target window after
+        // the menu closes before injecting keystrokes, so the first characters
+        // don't land on the menu. The hotkey path needs no delay — the target
+        // already has focus.
+        if fromMenu {
+            do {
+                try await Task.sleep(nanoseconds: AppInfo.menuTypeFocusDelayNanoseconds)
+            } catch {
+                return // cancelled during the focus delay
+            }
         }
 
         await ClipboardTyper.type(toType)
