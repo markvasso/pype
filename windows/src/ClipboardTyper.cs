@@ -2,6 +2,7 @@
 // Copyright (C) 2026 pype contributors
 
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Pype;
@@ -22,19 +23,25 @@ internal static class ClipboardTyper
         0xA3, // VK_RCONTROL
     };
 
+    /// <param name="cancellationToken">
+    /// Cancels an in-progress type (e.g. the tray "Stop Typing" item). On
+    /// cancellation the loop stops cleanly between characters — matters most
+    /// for the unbounded "Type Clipboard — No Limit" action, which can run for
+    /// a long time.
+    /// </param>
     /// <returns>
     /// True if every input event was accepted by SendInput. False on a partial
     /// or total failure (most commonly UIPI blocking injection into a
     /// higher-integrity foreground window, e.g. one running elevated).
     /// </returns>
-    public static async Task<bool> TypeAsync(string text)
+    public static async Task<bool> TypeAsync(string text, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(text)) return true;
 
-        // The trigger is Ctrl+Shift+V, and RegisterHotKey can fire while those
-        // keys are still physically held. Some apps read modifier state (not
-        // just the WM_CHAR stream) and would swallow the injected text as a
-        // shortcut, so force the modifiers up before typing anything.
+        // The trigger can be Ctrl+Shift+V, which RegisterHotKey can fire while
+        // those keys are still physically held. Some apps read modifier state
+        // (not just the WM_CHAR stream) and would swallow the injected text as
+        // a shortcut, so force the modifiers up before typing anything.
         ReleaseModifierKeys();
 
         // Normalize all line-ending styles (CRLF, lone CR, lone LF) to a single
@@ -47,6 +54,8 @@ internal static class ClipboardTyper
 
         for (int i = 0; i < normalized.Length; i++)
         {
+            if (cancellationToken.IsCancellationRequested) break;
+
             char c = normalized[i];
             var inputs = new List<NativeMethods.INPUT>(2);
 
@@ -66,7 +75,14 @@ internal static class ClipboardTyper
             // after the last character.
             if (i < normalized.Length - 1)
             {
-                await Task.Delay(AppInfo.TypingIntervalMs);
+                try
+                {
+                    await Task.Delay(AppInfo.TypingIntervalMs, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
             }
         }
 

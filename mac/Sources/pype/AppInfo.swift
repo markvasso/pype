@@ -17,8 +17,8 @@ enum AppInfo {
     /// enough not to feel sluggish, slow enough to visibly read as "typing."
     static let typingIntervalNanoseconds: UInt64 = 10_000_000 // 10ms
 
-    /// Delay before typing when triggered from the menu (not the hotkey), to
-    /// let focus return to the target window after the menu closes.
+    /// Delay before typing after the menu closes, to let focus return to the
+    /// target window so the first characters don't land on the menu itself.
     static let menuTypeFocusDelayNanoseconds: UInt64 = 350_000_000 // 350ms
 
     /// Project home, shown/linked in the About dialog.

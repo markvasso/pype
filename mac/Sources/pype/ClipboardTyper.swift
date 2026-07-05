@@ -13,6 +13,10 @@ enum ClipboardTyper {
     ///   CGEvent posting has no synchronous success/failure signal the way
     ///   Windows' SendInput does, so this reports whether the OS would even
     ///   let us try, not whether every keystroke landed.
+    ///
+    /// Honors task cancellation between characters (the menu's "Stop Typing"
+    /// cancels the enclosing Task), which matters most for the unbounded
+    /// "Type Clipboard — No Limit" action.
     @discardableResult
     static func type(_ text: String) async -> Bool {
         guard !text.isEmpty else { return true }
@@ -28,6 +32,8 @@ enum ClipboardTyper {
 
         let characters = Array(normalized)
         for (index, character) in characters.enumerated() {
+            if Task.isCancelled { break }
+
             if character == "\n" {
                 postKey(keyCode: CGKeyCode(kVK_Return), source: source)
             } else {
@@ -36,9 +42,14 @@ enum ClipboardTyper {
 
             // Paced rather than one instantaneous burst - see
             // AppInfo.typingIntervalNanoseconds for why. Skip the trailing
-            // delay after the last character.
+            // delay after the last character. Task.sleep throws on
+            // cancellation, which breaks the loop.
             if index < characters.count - 1 {
-                try? await Task.sleep(nanoseconds: AppInfo.typingIntervalNanoseconds)
+                do {
+                    try await Task.sleep(nanoseconds: AppInfo.typingIntervalNanoseconds)
+                } catch {
+                    break
+                }
             }
         }
         return true
@@ -50,12 +61,11 @@ enum ClipboardTyper {
               let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
             return
         }
-        // Clear modifier flags explicitly: the trigger is Cmd+Shift+V, and
-        // the hotkey can fire while those keys are still physically held.
-        // CGEventSource can otherwise merge current physical modifier state
-        // into freshly created events, which would make the injected text
-        // look like it's being typed with Cmd/Shift held — some apps would
-        // then treat it as a shortcut and swallow it instead of inserting text.
+        // Clear modifier flags explicitly: CGEventSource can otherwise merge
+        // whatever modifier keys are physically held into freshly created
+        // events, making the injected text look like it's typed with Cmd/Shift
+        // held — some apps would then treat it as a shortcut and swallow it
+        // instead of inserting text.
         down.flags = []
         up.flags = []
         down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 pype contributors
 
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -17,12 +18,18 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private readonly NotifyIcon _trayIcon;
     private readonly HotkeyWindow _hotkeyWindow;
+    private readonly ToolStripMenuItem _typeItem;
+    private readonly ToolStripMenuItem _typeUnlimitedItem;
+    private readonly ToolStripMenuItem _stopItem;
     private readonly ToolStripMenuItem _exitItem;
     // Installed-edition-only items (null in portable mode).
     private readonly ToolStripMenuItem? _runAtLoginItem;
     private readonly ToolStripMenuItem? _updateCheckItem;
+    private readonly System.Drawing.Image? _clipboardImage;
+    private readonly System.Drawing.Image? _clipboardUnlimitedImage;
     private System.Drawing.Icon? _ownedIcon;
     private bool _isTyping;
+    private CancellationTokenSource? _typeCts;
 
     public TrayAppContext()
     {
@@ -40,11 +47,23 @@ internal sealed class TrayAppContext : ApplicationContext
             Visible = true
         };
 
+        _clipboardImage = LoadMenuIcon("pype.clipboard.png");
+        _clipboardUnlimitedImage = LoadMenuIcon("pype.clipboard-unlimited.png");
+
+        // Type actions (both menu-triggered). The unlimited one is deliberately
+        // NOT bound to the hotkey - typing an unbounded clipboard should be a
+        // deliberate, explicit action, not something a keystroke can trigger.
+        _typeItem = new ToolStripMenuItem("Type Clipboard", _clipboardImage,
+            async (_, _) => await TypeClipboardAsync(fromMenu: true, unlimited: false));
+        _typeUnlimitedItem = new ToolStripMenuItem("Type Clipboard — No Limit", _clipboardUnlimitedImage,
+            async (_, _) => await TypeClipboardAsync(fromMenu: true, unlimited: true));
+        _stopItem = new ToolStripMenuItem("Stop Typing", null, (_, _) => StopTyping());
         _exitItem = new ToolStripMenuItem("Exit", null, (_, _) => ExitApp());
 
         var menu = new ContextMenuStrip();
-        // Primary action first: type the clipboard, same as the hotkey.
-        menu.Items.Add("Type clipboard", null, async (_, _) => await TypeClipboardAsync(fromMenu: true));
+        menu.Items.Add(_typeItem);
+        menu.Items.Add(_typeUnlimitedItem);
+        menu.Items.Add(_stopItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("About pype", null, (_, _) => ShowAbout());
 
@@ -63,14 +82,26 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(_exitItem);
 
         // Apply state synchronously as the menu opens so it's correct on the
-        // first (and every) open. AutoStartManager reads the Run registry key
-        // directly - a fast, synchronous local call - so there's no round-trip
-        // to hide behind a cache.
+        // first (and every) open. While a type is in progress the only enabled
+        // action is Stop Typing - everything else is disabled so a long
+        // "no limit" type can't be interrupted halfway by another action.
         menu.Opening += (_, _) =>
         {
-            _exitItem.Enabled = !_isTyping;
-            if (_runAtLoginItem is not null) _runAtLoginItem.Checked = AutoStartManager.IsEnabled();
-            if (_updateCheckItem is not null) _updateCheckItem.Checked = Settings.CheckForUpdatesOnStartup;
+            bool typing = _isTyping;
+            _typeItem.Enabled = !typing;
+            _typeUnlimitedItem.Enabled = !typing;
+            _stopItem.Enabled = typing;
+            _exitItem.Enabled = !typing;
+            if (_runAtLoginItem is not null)
+            {
+                _runAtLoginItem.Enabled = !typing;
+                _runAtLoginItem.Checked = AutoStartManager.IsEnabled();
+            }
+            if (_updateCheckItem is not null)
+            {
+                _updateCheckItem.Enabled = !typing;
+                _updateCheckItem.Checked = Settings.CheckForUpdatesOnStartup;
+            }
         };
         _trayIcon.ContextMenuStrip = menu;
 
@@ -108,21 +139,18 @@ internal sealed class TrayAppContext : ApplicationContext
         _ = CheckForUpdatesAsync();
     }
 
-    private async void OnHotkeyPressed() => await TypeClipboardAsync(fromMenu: false);
+    // The hotkey always types the bounded (128-char) version.
+    private async void OnHotkeyPressed() => await TypeClipboardAsync(fromMenu: false, unlimited: false);
 
-    private async Task TypeClipboardAsync(bool fromMenu)
+    private async Task TypeClipboardAsync(bool fromMenu, bool unlimited)
     {
-        // Typing is paced over real time (see AppInfo.TypingIntervalMs) - up to
-        // ~1.3s for the full 128 characters - instead of one instantaneous
-        // batch, so there's a real window for another trigger to arrive before
-        // this run finishes. Without this guard two overlapping runs would
-        // interleave their keystrokes into garbled output.
+        // One type at a time - overlapping runs would interleave keystrokes.
         if (_isTyping) return;
         _isTyping = true;
-        // Also disable Exit for that same window: without this, choosing Exit
-        // mid-type disposes _hotkeyWindow/_trayIcon and stops the message pump,
-        // silently abandoning the rest of the paced loop.
-        _exitItem.Enabled = false;
+
+        _typeCts?.Dispose();
+        _typeCts = new CancellationTokenSource();
+        var token = _typeCts.Token;
 
         try
         {
@@ -130,7 +158,7 @@ internal sealed class TrayAppContext : ApplicationContext
             // after the menu closes before we start injecting keystrokes.
             if (fromMenu)
             {
-                await Task.Delay(MenuTypeFocusDelayMs);
+                await Task.Delay(MenuTypeFocusDelayMs, token);
             }
 
             string text;
@@ -150,23 +178,24 @@ internal sealed class TrayAppContext : ApplicationContext
                 return;
             }
 
-            bool truncated = text.Length > AppInfo.MaxTypeLength;
-            string toType = truncated ? TruncateWithoutSplittingSurrogatePair(text, AppInfo.MaxTypeLength) : text;
+            bool willTruncate = !unlimited && text.Length > AppInfo.MaxTypeLength;
+            string toType = willTruncate ? TruncateWithoutSplittingSurrogatePair(text, AppInfo.MaxTypeLength) : text;
 
-            // Fire the notice first (it's non-blocking), then start typing right
-            // away so it isn't held up waiting on the notification. Typing itself
-            // is deliberately paced, not instantaneous - fast, but visibly
-            // "typing" rather than an indistinguishable-from-paste flash.
-            if (truncated)
+            // Fire the truncation notice first (non-blocking), then start typing
+            // right away. Typing is deliberately paced, not instantaneous - fast,
+            // but visibly "typing" rather than an indistinguishable-from-paste
+            // flash. The "No Limit" action skips truncation entirely.
+            if (willTruncate)
             {
                 _trayIcon.ShowBalloonTip(
                     4000,
                     "pype - text truncated",
-                    $"Clipboard held {text.Length} characters; only the first {toType.Length} were typed.",
+                    $"Clipboard held {text.Length} characters; only the first {toType.Length} were typed. Use \"Type Clipboard — No Limit\" for all of it.",
                     ToolTipIcon.Warning);
             }
 
-            if (!await ClipboardTyper.TypeAsync(toType))
+            bool ok = await ClipboardTyper.TypeAsync(toType, token);
+            if (!ok && !token.IsCancellationRequested)
             {
                 _trayIcon.ShowBalloonTip(
                     4000,
@@ -174,6 +203,10 @@ internal sealed class TrayAppContext : ApplicationContext
                     "Typing was blocked by Windows — the target window may be running elevated (as Administrator).",
                     ToolTipIcon.Warning);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopped via "Stop Typing" during the focus delay - nothing to report.
         }
         catch (Exception ex)
         {
@@ -186,9 +219,10 @@ internal sealed class TrayAppContext : ApplicationContext
         finally
         {
             _isTyping = false;
-            _exitItem.Enabled = true;
         }
     }
+
+    private void StopTyping() => _typeCts?.Cancel();
 
     private System.Drawing.Icon LoadAppIcon()
     {
@@ -214,6 +248,24 @@ internal sealed class TrayAppContext : ApplicationContext
         }
 
         return System.Drawing.SystemIcons.Application;
+    }
+
+    // Loads an embedded menu icon by its manifest resource name, returning a
+    // copy independent of the (disposed) stream. Returns null on any failure so
+    // a missing/renamed resource just means "no icon", not a crash.
+    private static System.Drawing.Image? LoadMenuIcon(string logicalName)
+    {
+        try
+        {
+            using var stream = typeof(TrayAppContext).Assembly.GetManifestResourceStream(logicalName);
+            if (stream is null) return null;
+            using var loaded = new System.Drawing.Bitmap(stream);
+            return new System.Drawing.Bitmap(loaded);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string TruncateWithoutSplittingSurrogatePair(string text, int maxLength)
@@ -279,9 +331,9 @@ internal sealed class TrayAppContext : ApplicationContext
         ShowInfoWithLink(
             caption: "About pype",
             heading: $"{AppInfo.DisplayName} {UpdateChecker.LocalVersionString}",
-            body: "Press Ctrl+Shift+V anywhere (or use \"Type clipboard\" in this menu) to\n" +
-                  "type the clipboard's text content. " +
-                  $"Text over {AppInfo.MaxTypeLength} characters is truncated.",
+            body: "Press Ctrl+Shift+V anywhere (or use \"Type Clipboard\" in this menu) to\n" +
+                  $"type the clipboard's text content. Text over {AppInfo.MaxTypeLength} characters is\n" +
+                  "truncated; \"Type Clipboard — No Limit\" types all of it.",
             url: AppInfo.RepoUrl);
     }
 
@@ -339,11 +391,15 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void ExitApp()
     {
+        _typeCts?.Cancel();
         _trayIcon.Visible = false;
         _hotkeyWindow.HotkeyPressed -= OnHotkeyPressed;
         _hotkeyWindow.Dispose();
         _trayIcon.Dispose();
         _ownedIcon?.Dispose();
+        _clipboardImage?.Dispose();
+        _clipboardUnlimitedImage?.Dispose();
+        _typeCts?.Dispose();
         ExitThread();
     }
 }

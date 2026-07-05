@@ -1,12 +1,13 @@
 # pype
 
-Types the current clipboard's text content wherever your cursor is, triggered
-by a hotkey — **Ctrl+Shift+V** on Windows, **Cmd+Shift+V** on macOS (each
-platform's native equivalent of the same "paste as plain text" convention).
-If the clipboard text is longer than 128 characters, pype types only the
-first 128 and shows a notification explaining why it was truncated. Typing
-is deliberately paced rather than instantaneous, so it's visibly pype (not
-a native paste) doing it.
+Types the current clipboard's text content wherever your cursor is. On
+**Windows** it's triggered by a hotkey (**Ctrl+Shift+V**) or a tray-menu item;
+on **macOS** it's invoked from the menu bar menu (no global hotkey — see
+[the two implementations](#the-two-implementations) for why the platforms
+differ). If the clipboard text is longer than 128 characters, pype types only
+the first 128 and shows a notification explaining why it was truncated — or use
+**Type Clipboard — No Limit** to type all of it. Typing is deliberately paced
+rather than instantaneous, so it's visibly pype (not a native paste) doing it.
 
 ## Use case
 
@@ -22,20 +23,26 @@ in places where clipboard paste is disabled or simply doesn't reach:
   without hunting for that app's own "paste as plain text" shortcut.
 
 It's a small, single-purpose utility, not a text expander or clipboard
-manager — one hotkey, one job.
+manager — one job, done well.
 
 ## Features
 
-- Global hotkey types the clipboard's text content into whatever has focus —
-  or a **"Type clipboard"** item in the tray/menu-bar menu for the same thing.
-- 128-character cap with a notification explaining the truncation, so a
-  huge or unexpected clipboard contents never silently dumps somewhere.
+- **Type Clipboard** — types the clipboard's text content into whatever has
+  focus, from the tray/menu-bar menu (and on Windows, the **Ctrl+Shift+V**
+  hotkey too).
+- **Type Clipboard — No Limit** types the entire clipboard past the 128-char
+  cap. It's menu-only and never bound to a shortcut, so dumping a large blob of
+  text is always an explicit, deliberate action.
+- **Stop Typing** cancels a type in progress (matters most for the unbounded
+  "No Limit" action), leaving pype running.
+- 128-character cap (on the hotkey / "Type Clipboard") with a notification
+  explaining the truncation, so huge or unexpected clipboard contents never
+  silently dumps somewhere.
 - Typing is paced (fast, but visible), not an instant flash — a clear signal
   it's pype doing the typing.
 - Tray icon (Windows) / menu bar item (macOS) with About (links to GitHub) and
   Exit/Quit. The installed edition also has a **Run at Login** toggle and a
-  **Check for updates on startup** toggle; macOS additionally shows live
-  Accessibility-permission status and a one-click way to open the setting.
+  **Check for updates on startup** toggle.
 - Run at Login (when you enable it) is visible where users expect it — Task
   Manager's Startup tab on Windows (a `Run` key entry), Login Items on macOS
   (`SMAppService`). Installers don't force it on.
@@ -59,8 +66,8 @@ manager — one hotkey, one job.
   including the RMM/registry integration — is in
   [`windows/README.md`](windows/README.md#patching--rmm-management).
 - **macOS**: no registry equivalent (there's no macOS analogue of
-  Programs-and-Features) — rebuild and reinstall the `.pkg` to update. See
-  [`mac/README.md`](mac/README.md).
+  Programs-and-Features) — reinstall the `.pkg`, or replace the `pype.app` from
+  the portable `.zip`, to update. See [`mac/README.md`](mac/README.md).
 
 ## The two implementations
 
@@ -70,8 +77,12 @@ for build, install, and usage instructions:
 - **[Windows](windows/README.md)** — C#/.NET WinForms tray app. PowerShell
   and GUI (NSIS) installers, `Run`-key autostart (visible in Task Manager),
   registry integration for RMM/patch-management tools.
-- **[macOS](mac/README.md)** — Swift/AppKit menu bar app. `.pkg` installer,
-  `SMAppService` autostart.
+- **[macOS](mac/README.md)** — Swift/AppKit menu bar app. `.pkg` installer or
+  portable `.zip`, `SMAppService` autostart. **Menu-only, no global hotkey,
+  and no Accessibility prompt**: because these builds aren't Developer ID
+  signed, an Accessibility grant doesn't survive updates, so a hotkey that
+  silently does nothing and a prompt that misleads would both do more harm than
+  good — typing is invoked from the menu and you grant Accessibility yourself.
 
 Neither is a port of the other — none of the Windows-specific mechanisms
 (WinForms, Win32 P/Invoke, the registry) exist on macOS, and vice versa. Each

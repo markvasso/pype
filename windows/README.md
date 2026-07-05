@@ -27,8 +27,17 @@ Manager.
 
 - `RegisterHotKey` (Win32) registers Ctrl+Shift+V against a hidden
   message-only window — no taskbar/Alt+Tab presence. The same typing action
-  is also available as **"Type clipboard"** in the tray right-click menu (it
-  waits ~350ms for focus to return to your target window before typing).
+  is also available as **"Type Clipboard"** (with a clipboard icon) in the tray
+  right-click menu (it waits ~350ms for focus to return to your target window
+  before typing).
+- **"Type Clipboard — No Limit"** in the tray menu types the *entire* clipboard
+  with no 128-character cap. It's deliberately menu-only and **never bound to
+  the hotkey**, so injecting an unbounded amount of text is always an explicit,
+  deliberate choice rather than something a keystroke could trigger.
+- **"Stop Typing"** cancels an in-progress type cleanly and leaves pype
+  running. It's the only enabled action while a type is underway (the type
+  items and Exit are disabled until typing finishes or is stopped), which
+  matters most for the potentially long "No Limit" action.
 - On trigger, it reads clipboard text (`Clipboard.GetText`, with retry since
   the clipboard is a shared OS resource other apps can transiently hold).
 - Text is typed via `SendInput` using `KEYEVENTF_UNICODE`, which sends raw
@@ -40,9 +49,10 @@ Manager.
   If Windows blocks the injection (most commonly UIPI, when the target window
   is running elevated as Administrator), a tray notice explains that too.
 - Text over 128 characters is truncated to the first 128 (without splitting
-  a UTF-16 surrogate pair across the boundary), and a non-blocking tray
-  balloon notification explains the truncation while typing proceeds
-  immediately.
+  a UTF-16 surrogate pair across the boundary) for the hotkey and the "Type
+  Clipboard" item, and a non-blocking tray balloon notification explains the
+  truncation while typing proceeds immediately. ("Type Clipboard — No Limit"
+  skips this cap.)
 - **Autostart** is controlled from the tray menu's **"Run at Login"** toggle
   (installed edition only), which writes the per-user `Run` registry key
   (`HKCU\...\Run`) — visible and toggleable in **Task Manager's Startup tab**.
@@ -56,8 +66,9 @@ Manager.
   tray menu's **"Check for updates on startup"** toggle.
 - **About** (tray menu) links to the project's GitHub page.
 - **Portable vs installed**: the same `pype.exe` runs either way. Run on its
-  own it's *portable* — just the hotkey, "Type clipboard", About, and Exit.
-  Placed by the installer (which drops a marker file next to it), it's the
+  own it's *portable* — just the hotkey, "Type Clipboard", "Type Clipboard —
+  No Limit", "Stop Typing", About, and Exit. Placed by the installer (which
+  drops a marker file next to it), it's the
   *installed* edition and additionally shows Run at Login and the update
   check. Portable pype never touches autostart or the network.
 
@@ -304,8 +315,11 @@ each user to enable — if you need every user's pype to autostart, set the
 ## Usage
 
 Copy any text to the clipboard, place your cursor wherever you want it typed,
-then press **Ctrl+Shift+V**. Right-click the tray icon for About, "Run at
-Login" (see [How it works](#how-it-works)), and Exit.
+then press **Ctrl+Shift+V** — or right-click the tray icon and choose **Type
+Clipboard**. To type more than 128 characters, use **Type Clipboard — No
+Limit** (menu only, never the hotkey); use **Stop Typing** to cancel a type in
+progress. The tray menu also has About, "Run at Login" (see
+[How it works](#how-it-works)), and Exit.
 
 ## Known limitations
 

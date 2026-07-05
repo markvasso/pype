@@ -10,7 +10,13 @@ publish/
 # just a build artifact the .pkg is made from, so it's not committed.
 /windows/dist/
 /windows/installer/pype.exe
-/mac/dist/pype.app/
+# Ignore everything under mac/dist EXCEPT the committed installer: the loose
+# .app (and any stale root-owned copy a `sudo installer` test left behind) and
+# the portable .zip are all build artifacts. The .zip is a release-time asset
+# uploaded to the GitHub release, built from the same .app the .pkg wraps -
+# see build-portable.sh - so there's no need to commit a second copy.
+/mac/dist/*
+!/mac/dist/PypeInstaller.pkg
 *.user
 .DS_Store
 .build/
