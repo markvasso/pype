@@ -30,11 +30,15 @@ internal sealed class TrayAppContext : ApplicationContext
     private System.Drawing.Icon? _ownedIcon;
     private bool _isTyping;
     private CancellationTokenSource? _typeCts;
-    // The window that had focus just before the tray menu was opened. Captured
-    // on tray mouse-down (before WinForms activates its own hidden window to
-    // show the menu) so a menu-invoked type can hand focus back to the app the
-    // user was actually in.
+    // The last non-pype window to hold the foreground - the app a menu-invoked
+    // type should hand focus back to (opening the tray menu makes pype's own
+    // hidden window foreground). Kept current by a foreground-change hook, with
+    // the tray mouse-down handler as a fallback if the hook didn't install.
     private IntPtr _lastForeground;
+    private IntPtr _foregroundHook;
+    // Held in a field so the GC doesn't collect the delegate the unmanaged hook
+    // still calls back into (that would crash the process).
+    private NativeMethods.WinEventDelegate? _foregroundProc;
 
     public TrayAppContext()
     {
@@ -110,13 +114,21 @@ internal sealed class TrayAppContext : ApplicationContext
         };
         _trayIcon.ContextMenuStrip = menu;
 
-        // Capture the foreground window on mouse-DOWN, before the menu opens.
-        // Showing a NotifyIcon menu makes WinForms activate its own hidden
-        // window (so the menu dismisses correctly), which steals focus from the
-        // app the user was in. Mouse-down fires before that, so GetForegroundWindow
-        // here still returns the real target; a menu-invoked type restores it.
+        // Primary capture: a system-wide foreground-change hook keeps
+        // _lastForeground pointing at the last real (non-pype) app, regardless
+        // of exactly when the tray is clicked. WINEVENT_SKIPOWNPROCESS makes it
+        // ignore pype's own window becoming foreground (the menu itself).
+        _foregroundProc = OnForegroundChanged;
+        _foregroundHook = NativeMethods.SetWinEventHook(
+            NativeMethods.EVENT_SYSTEM_FOREGROUND, NativeMethods.EVENT_SYSTEM_FOREGROUND,
+            IntPtr.Zero, _foregroundProc, 0, 0,
+            NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS);
+
+        // Fallback capture: if the hook didn't install, grab the foreground on
+        // tray mouse-down (fires before the menu steals focus).
         _trayIcon.MouseDown += (_, _) =>
         {
+            if (_foregroundHook != IntPtr.Zero) return;
             IntPtr fg = NativeMethods.GetForegroundWindow();
             if (fg != IntPtr.Zero && !IsOwnWindow(fg))
             {
@@ -199,17 +211,14 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             // Triggered from the menu: the menu stole focus to pype's own
             // hidden window, and it does NOT return to the target app on its
-            // own. Explicitly re-activate the window the user was in (captured
-            // on tray mouse-down), then give it a moment to actually come
-            // forward before injecting keystrokes. pype is the foreground
-            // process at this point (it owns the just-closed menu), so
-            // SetForegroundWindow is allowed to hand focus back.
+            // own. Re-activate the window the user was in (captured on tray
+            // mouse-down) via AttachThreadInput - a plain SetForegroundWindow is
+            // silently ignored here (the foreground lock), which is why the
+            // earlier fix didn't work. Then wait for the activation to settle
+            // before injecting keystrokes.
             if (fromMenu)
             {
-                if (_lastForeground != IntPtr.Zero)
-                {
-                    NativeMethods.SetForegroundWindow(_lastForeground);
-                }
+                RestoreForeground(_lastForeground);
                 await Task.Delay(MenuTypeFocusDelayMs, token);
             }
 
@@ -276,6 +285,20 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void StopTyping() => _typeCts?.Cancel();
 
+    // Foreground-change callback (see the SetWinEventHook in the constructor).
+    // Records real top-level windows only, skipping pype's own - so at any
+    // moment _lastForeground is the app to hand focus back to for a
+    // menu-invoked type.
+    private void OnForegroundChanged(
+        IntPtr hook, uint eventType, IntPtr hwnd,
+        int idObject, int idChild, uint thread, uint time)
+    {
+        if (hwnd != IntPtr.Zero && idObject == NativeMethods.OBJID_WINDOW && !IsOwnWindow(hwnd))
+        {
+            _lastForeground = hwnd;
+        }
+    }
+
     // True if the window belongs to pype's own process - used to skip pype's
     // own windows when capturing the "return focus here" target, so opening the
     // menu doesn't record pype itself as the app to type into.
@@ -283,6 +306,46 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         NativeMethods.GetWindowThreadProcessId(hWnd, out uint pid);
         return pid == (uint)Environment.ProcessId;
+    }
+
+    // Force `target` back to the foreground so menu-invoked keystrokes land in
+    // it. A bare SetForegroundWindow no-ops here because of Windows' foreground
+    // lock (the tray menu left pype's hidden window foreground). Attaching our
+    // input queue to the target's thread for the duration lifts the lock so the
+    // activation actually takes effect - this is what the previous attempt was
+    // missing. Best-effort: any step failing just means we fall back to the old
+    // (broken) behavior for this one type, never a crash.
+    private static void RestoreForeground(IntPtr target)
+    {
+        if (target == IntPtr.Zero) return;
+
+        uint targetThread = NativeMethods.GetWindowThreadProcessId(target, out _);
+        uint thisThread = NativeMethods.GetCurrentThreadId();
+        bool attached = false;
+
+        try
+        {
+            if (targetThread != thisThread)
+            {
+                attached = NativeMethods.AttachThreadInput(thisThread, targetThread, true);
+            }
+
+            // Un-minimize if needed, then raise + activate + focus while attached.
+            if (NativeMethods.IsIconic(target))
+            {
+                NativeMethods.ShowWindow(target, NativeMethods.SW_RESTORE);
+            }
+            NativeMethods.BringWindowToTop(target);
+            NativeMethods.SetForegroundWindow(target);
+            NativeMethods.SetFocus(target);
+        }
+        finally
+        {
+            if (attached)
+            {
+                NativeMethods.AttachThreadInput(thisThread, targetThread, false);
+            }
+        }
     }
 
     private System.Drawing.Icon LoadAppIcon()
@@ -455,6 +518,11 @@ internal sealed class TrayAppContext : ApplicationContext
     private void ExitApp()
     {
         _typeCts?.Cancel();
+        if (_foregroundHook != IntPtr.Zero)
+        {
+            NativeMethods.UnhookWinEvent(_foregroundHook);
+            _foregroundHook = IntPtr.Zero;
+        }
         _trayIcon.Visible = false;
         _hotkeyWindow.HotkeyPressed -= OnHotkeyPressed;
         _hotkeyWindow.Dispose();
