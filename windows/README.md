@@ -34,10 +34,13 @@ Manager.
   with no 128-character cap. It's deliberately menu-only and **never bound to
   the hotkey**, so injecting an unbounded amount of text is always an explicit,
   deliberate choice rather than something a keystroke could trigger.
-- **"Stop Typing"** cancels an in-progress type cleanly and leaves pype
-  running. It's the only enabled action while a type is underway (the type
-  items and Exit are disabled until typing finishes or is stopped), which
-  matters most for the potentially long "No Limit" action.
+- **Stopping a type in progress** can be done three ways: press **Ctrl+Shift+V
+  again** (the hotkey toggles — it stops a running type instead of starting a
+  new one), **left-click the tray icon**, or use **"Stop Typing"** in the menu.
+  The first two exist because opening the menu mid-type is awkward — the
+  injected keystrokes fight the menu for focus. Stopping cancels cleanly and
+  leaves pype running; while a type is underway the type items and Exit are
+  disabled. This matters most for the potentially long "No Limit" action.
 - On trigger, it reads clipboard text (`Clipboard.GetText`, with retry since
   the clipboard is a shared OS resource other apps can transiently hold).
 - Text is typed via `SendInput` using `KEYEVENTF_UNICODE`, which sends raw
@@ -317,9 +320,19 @@ each user to enable — if you need every user's pype to autostart, set the
 Copy any text to the clipboard, place your cursor wherever you want it typed,
 then press **Ctrl+Shift+V** — or right-click the tray icon and choose **Type
 Clipboard**. To type more than 128 characters, use **Type Clipboard — No
-Limit** (menu only, never the hotkey); use **Stop Typing** to cancel a type in
-progress. The tray menu also has About, "Run at Login" (see
-[How it works](#how-it-works)), and Exit.
+Limit** (menu only, never the hotkey). The tray menu also has About, "Run at
+Login" (see [How it works](#how-it-works)), and Exit.
+
+**Stopping a type in progress** (useful mainly for a long "No Limit" run) can be
+done three ways — opening the menu to click "Stop Typing" mid-type is awkward,
+since the keystrokes being injected fight the menu for focus, so there are two
+faster options:
+
+- **Press Ctrl+Shift+V again** — the hotkey is a toggle: it stops a running
+  type instead of starting a new one.
+- **Left-click the tray icon** — a single left-click stops a running type.
+  (Right-click still opens the menu, which also has Stop Typing.)
+- **Stop Typing** in the menu still works too.
 
 ## Known limitations
 

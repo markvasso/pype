@@ -105,6 +105,18 @@ internal sealed class TrayAppContext : ApplicationContext
         };
         _trayIcon.ContextMenuStrip = menu;
 
+        // A left-click on the tray icon while a type is running stops it - the
+        // low-friction stop the user can hit without opening the menu (opening
+        // it mid-type is awkward because the injected keystrokes fight the menu
+        // for focus). Right-click still opens the menu, which also has Stop.
+        _trayIcon.MouseClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left && _isTyping)
+            {
+                StopTyping();
+            }
+        };
+
         try
         {
             // MOD_NOREPEAT stops WM_HOTKEY from re-firing on OS-level key
@@ -139,8 +151,20 @@ internal sealed class TrayAppContext : ApplicationContext
         _ = CheckForUpdatesAsync();
     }
 
-    // The hotkey always types the bounded (128-char) version.
-    private async void OnHotkeyPressed() => await TypeClipboardAsync(fromMenu: false, unlimited: false);
+    // The hotkey is a toggle: while a type is running it STOPS it, otherwise
+    // it types the bounded (128-char) version. Stopping via the same key the
+    // user already knows is the low-friction way out of a long "No Limit" run -
+    // opening the menu mid-type is awkward, since the injected keystrokes fight
+    // for focus with the menu itself.
+    private async void OnHotkeyPressed()
+    {
+        if (_isTyping)
+        {
+            StopTyping();
+            return;
+        }
+        await TypeClipboardAsync(fromMenu: false, unlimited: false);
+    }
 
     private async Task TypeClipboardAsync(bool fromMenu, bool unlimited)
     {
@@ -333,7 +357,9 @@ internal sealed class TrayAppContext : ApplicationContext
             heading: $"{AppInfo.DisplayName} {UpdateChecker.LocalVersionString}",
             body: "Press Ctrl+Shift+V anywhere (or use \"Type Clipboard\" in this menu) to\n" +
                   $"type the clipboard's text content. Text over {AppInfo.MaxTypeLength} characters is\n" +
-                  "truncated; \"Type Clipboard — No Limit\" types all of it.",
+                  "truncated; \"Type Clipboard — No Limit\" types all of it.\n\n" +
+                  "To stop a type in progress: press Ctrl+Shift+V again, left-click the\n" +
+                  "tray icon, or use \"Stop Typing\".",
             url: AppInfo.RepoUrl);
     }
 

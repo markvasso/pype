@@ -160,8 +160,17 @@ Copy any text to the clipboard, click wherever you want it typed, then press
   Deliberately menu-only and **never bound to the hotkey**, so injecting an
   unbounded blob of text is always an explicit, deliberate action.
 - **Stop Typing** — cancels an in-progress type cleanly (pype keeps running).
-  Only enabled while typing; the type actions and Quit are disabled until the
-  current type finishes or is stopped.
+
+**Stopping a type in progress** (useful mainly for a long "No Limit" run) can be
+done three ways — trying to open the menu and click "Stop Typing" mid-type is
+awkward, because the keystrokes being injected fight the menu for focus, so
+there are two faster options:
+
+- **Press Cmd+Shift+V again** — the hotkey is a toggle: it stops a running type
+  instead of starting a new one.
+- **Click the menu bar icon** — a single click stops a running type (it opens
+  the menu as usual when nothing is being typed).
+- **Stop Typing** in the menu still works too.
 
 The menu also has About (which links to the GitHub page), the Accessibility
 status / "Grant Accessibility Access…" item, a "Run at Login" toggle (checkmark

@@ -18,6 +18,7 @@ import ApplicationServices
 @MainActor
 final class StatusBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
+    private let menu = NSMenu()
     private let hotkeyManager = HotkeyManager()
     private let typeItem = NSMenuItem()
     private let typeUnlimitedItem = NSMenuItem()
@@ -45,9 +46,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 // bundled icon resource is missing for some reason.
                 button.title = "pype"
             }
+            // Handle clicks ourselves instead of assigning statusItem.menu
+            // permanently: while a type runs a click must STOP it (not open the
+            // menu), and otherwise it should open the menu. statusItemClicked
+            // decides which, and pops the menu with NSMenu.popUp when needed.
+            button.target = self
+            button.action = #selector(statusItemClicked)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        let menu = NSMenu()
         menu.delegate = self
 
         // Primary action: type the clipboard (bounded to 128 characters),
@@ -107,14 +114,21 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
 
-        statusItem.menu = menu
-
         // HotkeyManager's callback fires from a synchronous Carbon C callback,
-        // which can't itself be async - hop to the main actor and start a
-        // (bounded, non-menu) type. The hotkey never triggers the unbounded
-        // "No Limit" variant.
+        // which can't itself be async - hop to the main actor. The hotkey is a
+        // toggle: while a type runs it STOPS it (the low-friction way out of a
+        // long "No Limit" run — reaching the menu mid-type is awkward), and
+        // otherwise it starts a bounded, non-menu type. It never triggers the
+        // unbounded "No Limit" variant.
         hotkeyManager.onHotkey = { [weak self] in
-            Task { @MainActor in self?.startTyping(unlimited: false, fromMenu: false) }
+            Task { @MainActor in
+                guard let self else { return }
+                if self.isTyping {
+                    self.stopTyping()
+                } else {
+                    self.startTyping(unlimited: false, fromMenu: false)
+                }
+            }
         }
         if !hotkeyManager.register() {
             NotificationManager.show(
@@ -122,6 +136,27 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 body: "Could not register the Cmd+Shift+V hotkey. It may already be in use by another app. You can still type from the menu bar icon."
             )
         }
+    }
+
+    // A click on the menu bar icon. While a type is running it STOPS it - the
+    // easy-to-hit stop that doesn't require opening the menu (opening it
+    // mid-type is awkward, since the injected keystrokes fight the menu for
+    // focus). Otherwise it opens the menu.
+    //
+    // We show the menu with popUp(...) rather than assigning statusItem.menu:
+    // a permanent statusItem.menu would auto-open on every click, defeating the
+    // click-to-stop behavior, and the assign-then-performClick workaround risks
+    // re-entering this handler. popUp is deterministic and can't recurse. The
+    // manual highlight gives the button the usual "pressed" look while open.
+    @objc private func statusItemClicked() {
+        if isTyping {
+            stopTyping()
+            return
+        }
+        guard let button = statusItem.button else { return }
+        button.highlight(true)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 5), in: button)
+        button.highlight(false)
     }
 
     // Refreshes item state each time the menu opens. While a type is in
@@ -249,6 +284,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         alert.informativeText = """
             Press Cmd+Shift+V anywhere (or use "Type Clipboard" in this menu) to type the clipboard's text content.
             Text over \(AppInfo.maxTypeLength) characters is truncated; "Type Clipboard — No Limit" types all of it.
+
+            To stop a type in progress: press Cmd+Shift+V again, click the menu bar icon, or use "Stop Typing".
             """
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")

@@ -33,8 +33,11 @@ manager — one hotkey, one job.
 - **Type Clipboard — No Limit** types the entire clipboard past the 128-char
   cap. It's menu-only and never bound to a shortcut, so dumping a large blob of
   text is always an explicit, deliberate action.
-- **Stop Typing** cancels a type in progress (matters most for the unbounded
-  "No Limit" action), leaving pype running.
+- **Stop a type in progress** three ways (it matters most for the unbounded
+  "No Limit" action): press the hotkey again (it toggles), click the tray /
+  menu-bar icon, or use **Stop Typing** in the menu — leaving pype running. The
+  first two exist because opening the menu mid-type is awkward while keystrokes
+  are being injected.
 - 128-character cap (on the hotkey / "Type Clipboard") with a notification
   explaining the truncation, so huge or unexpected clipboard contents never
   silently dumps somewhere.
