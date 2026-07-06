@@ -40,7 +40,7 @@ internal sealed class TrayAppContext : ApplicationContext
         // menu-invoked type couldn't reliably keep focus on the target app (the
         // tray menu steals it), which is why the menu just states the shortcut.
         // These lines are informational (disabled).
-        var typeInfo = new ToolStripMenuItem("Ctrl + ` — Type clipboard") { Enabled = false };
+        var typeInfo = new ToolStripMenuItem("Ctrl + ' — Type clipboard") { Enabled = false };
         var stopInfo = new ToolStripMenuItem("Press the shortcut again to stop") { Enabled = false };
         _exitItem = new ToolStripMenuItem("Exit", null, (_, _) => ExitApp());
 
@@ -79,11 +79,11 @@ internal sealed class TrayAppContext : ApplicationContext
         try
         {
             // MOD_NOREPEAT stops WM_HOTKEY from re-firing on OS-level key repeat
-            // while Ctrl+` is held - without it, holding it down would spam
+            // while Ctrl+' is held - without it, holding it down would spam
             // OnHotkeyPressed before _isTyping's re-entrancy guard comes into play.
             _hotkeyWindow.RegisterHotkey(
                 NativeMethods.MOD_CONTROL | NativeMethods.MOD_NOREPEAT,
-                NativeMethods.VK_OEM_3,
+                ApostropheVirtualKey(),
                 AppInfo.HotkeyId);
         }
         catch (Exception ex)
@@ -111,7 +111,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _ = CheckForUpdatesAsync(userInitiated: false);
     }
 
-    // Ctrl+` is a toggle: while a type is running it STOPS it; otherwise it
+    // Ctrl+' is a toggle: while a type is running it STOPS it; otherwise it
     // types the whole clipboard. The target window keeps focus (the hotkey
     // doesn't steal it the way opening the tray menu would), so no focus
     // juggling is needed.
@@ -185,6 +185,18 @@ internal sealed class TrayAppContext : ApplicationContext
     }
 
     private void StopTyping() => _typeCts?.Cancel();
+
+    // The virtual-key code for the apostrophe ( ' ) key on the ACTIVE keyboard
+    // layout - US puts it on VK_OEM_7, UK on VK_OEM_3, others elsewhere. Resolve
+    // it at runtime so "Ctrl + '" binds the right physical key regardless of
+    // layout, rather than hardcoding one layout's VK. Falls back to the US
+    // apostrophe key if the character isn't reachable on the current layout.
+    private static uint ApostropheVirtualKey()
+    {
+        short scan = NativeMethods.VkKeyScanEx('\'', NativeMethods.GetKeyboardLayout(0));
+        if (scan == -1) return NativeMethods.VK_OEM_7;
+        return (uint)(scan & 0xFF);
+    }
 
     private System.Drawing.Icon LoadAppIcon()
     {
@@ -265,7 +277,7 @@ internal sealed class TrayAppContext : ApplicationContext
         ShowInfoWithLink(
             caption: "About pype",
             heading: $"{AppInfo.DisplayName} {UpdateChecker.LocalVersionString}",
-            body: "Press Ctrl+` anywhere to type the clipboard's text content\n" +
+            body: "Press Ctrl+' anywhere to type the clipboard's text content\n" +
                   "wherever your cursor is. Press the same shortcut again to stop\n" +
                   "a type in progress.",
             url: AppInfo.RepoUrl);

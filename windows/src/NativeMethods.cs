@@ -12,11 +12,12 @@ internal static class NativeMethods
     public const uint MOD_CONTROL = 0x0002;
     public const uint MOD_NOREPEAT = 0x4000;
 
-    // VK_OEM_3 is the `/~ key (left of the "1" row on a US layout) - the
-    // backtick pype's hotkeys use. It's "OEM" because its physical position
-    // maps to different characters on non-US layouts, but the virtual-key code
-    // is stable, which is all RegisterHotKey needs.
-    public const uint VK_OEM_3 = 0xC0;
+    // The physical key that produces an apostrophe ( ' ) has a DIFFERENT
+    // virtual-key code per layout - VK_OEM_7 (0xDE) on US, VK_OEM_3 (0xC0) on
+    // UK, etc. RegisterHotKey binds a VK by physical position, not by character,
+    // so there's no single "apostrophe" VK. VK_OEM_7 is only the US fallback;
+    // the actual VK is resolved at runtime with VkKeyScanEx (see TrayAppContext).
+    public const uint VK_OEM_7 = 0xDE;
 
     public const uint INPUT_KEYBOARD = 1;
     public const uint KEYEVENTF_KEYUP = 0x0002;
@@ -27,6 +28,15 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+    // Resolve which virtual key produces a given character on a keyboard layout.
+    // The low byte of the result is the VK; high byte is the shift state.
+    // Returns -1 if the character isn't reachable on the layout.
+    [DllImport("user32.dll")]
+    public static extern short VkKeyScanEx(char ch, IntPtr dwhkl);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetKeyboardLayout(uint idThread);
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);

@@ -343,7 +343,7 @@ try {
 
     Write-PypeLog 'Install complete.'
     if (-not $Silent) {
-        Write-Host "`npype $displayVersion installed ($resolvedScope scope). Press Ctrl+`` anywhere to type clipboard text." -ForegroundColor Green
+        Write-Host "`npype $displayVersion installed ($resolvedScope scope). Press Ctrl+' anywhere to type clipboard text." -ForegroundColor Green
     }
     exit 0
 }

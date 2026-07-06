@@ -1,9 +1,9 @@
 # pype
 
 Types the current clipboard's text content wherever your cursor is. Press
-**Ctrl+`** (**Cmd+`** on macOS) to type it, and press the same shortcut again to
-stop a type in progress. The backtick key was chosen because it rarely collides
-with other apps' shortcuts. Typing is deliberately paced rather than
+**Ctrl+'** (**Cmd+'** on macOS) to type it, and press the same shortcut again to
+stop a type in progress. The apostrophe key was chosen because it rarely
+collides with other apps' shortcuts. Typing is deliberately paced rather than
 instantaneous, so it's visibly pype (not a native paste) doing it.
 
 ## Use case
@@ -24,7 +24,7 @@ manager — one hotkey, one job.
 
 ## Features
 
-- **One hotkey**: **Ctrl+`** (**Cmd+`** on macOS) types the clipboard; press it
+- **One hotkey**: **Ctrl+'** (**Cmd+'** on macOS) types the clipboard; press it
   again to stop a type in progress — leaving pype running. Typing is
   hotkey-driven so the target window keeps focus; the tray / menu-bar menu just
   states the shortcut.
@@ -70,7 +70,7 @@ for build, install, and usage instructions:
   and GUI (NSIS) installers, `Run`-key autostart (visible in Task Manager),
   registry integration for RMM/patch-management tools.
 - **[macOS](mac/README.md)** — Swift/AppKit menu bar app. `.pkg` installer or
-  portable `.zip`, `SMAppService` autostart, Cmd+` via Carbon
+  portable `.zip`, `SMAppService` autostart, Cmd+' via Carbon
   `RegisterEventHotKey`. Keystroke injection needs Accessibility permission,
   and because these builds aren't Developer ID signed that grant doesn't
   survive updates — so the menu carries a live status item and step-by-step

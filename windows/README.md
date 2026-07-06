@@ -1,7 +1,7 @@
 # pype
 
 Types the current clipboard's text content wherever your cursor is, triggered
-by **Ctrl+`**. Press the same shortcut again to stop a type in progress.
+by **Ctrl+'**. Press the same shortcut again to stop a type in progress.
 
 This README covers the **Windows** version (this folder). There's also a
 **macOS** menu bar version — same behavior, separate Swift/AppKit
@@ -23,14 +23,14 @@ Manager.
 
 ## How it works
 
-- `RegisterHotKey` (Win32) registers **Ctrl+`** against a hidden message-only
+- `RegisterHotKey` (Win32) registers **Ctrl+'** against a hidden message-only
   window — no taskbar/Alt+Tab presence. Typing is hotkey-only: the tray menu
   just states the shortcut. That's deliberate — a menu-invoked type couldn't
   reliably keep focus on your target app (opening the tray menu steals focus to
   pype's own hidden window, and Windows' foreground lock made handing it back
   unreliable), so the hotkey is the one path where the target window is already
   focused and keystrokes land where you expect.
-- **Stopping a type in progress**: press **Ctrl+` again** — while a type is
+- **Stopping a type in progress**: press **Ctrl+' again** — while a type is
   running, the hotkey toggles to stop it. Stopping cancels cleanly and leaves
   pype running. This matters most for a large clipboard, which can take a while.
 - On trigger, it reads clipboard text (`Clipboard.GetText`, with retry since
@@ -306,7 +306,7 @@ each user to enable — if you need every user's pype to autostart, set the
 ## Usage
 
 Copy any text to the clipboard, place your cursor wherever you want it typed,
-then press **Ctrl+`**. To stop a type in progress, press it again. The tray
+then press **Ctrl+'**. To stop a type in progress, press it again. The tray
 menu states the shortcut and has About, "Run at Login" (see
 [How it works](#how-it-works)), and Exit.
 
@@ -320,7 +320,7 @@ menu states the shortcut and has About, "Run at Login" (see
 - **Plain text only**: reads whatever `Clipboard.GetText()` returns; rich
   text, images, or files on the clipboard are ignored (nothing is typed, with
   a tray notice if there's no text at all).
-- **One hotkey**: Ctrl+` is fixed, not currently configurable. If another app
+- **One hotkey**: Ctrl+' is fixed, not currently configurable. If another app
   has already claimed it, pype shows a tray error on startup instead of
   silently failing.
 - **Switching scopes**: installing `Machine`-scope on a machine that already

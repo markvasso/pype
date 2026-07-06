@@ -6,7 +6,7 @@ import ApplicationServices
 
 /// Menu bar item + menu — the macOS equivalent of the Windows tray icon.
 ///
-/// Typing is invoked only by the global Cmd+` hotkey: it types the whole
+/// Typing is invoked only by the global Cmd+' hotkey: it types the whole
 /// clipboard, and pressing it again stops a type in progress. The menu itself
 /// just states the shortcut (a menu-invoked type couldn't reliably keep focus
 /// on the target app). Only the keystroke *injection* in ClipboardTyper needs
@@ -53,7 +53,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
         // Informational lines stating the shortcut. Typing is hotkey-only, so
         // these aren't actions - just a reminder.
-        menu.addItem(infoItem("⌘` — Type clipboard"))
+        menu.addItem(infoItem("⌘' — Type clipboard"))
         menu.addItem(infoItem("Press the shortcut again to stop"))
 
         menu.addItem(.separator())
@@ -96,7 +96,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         statusItem.menu = menu
 
         // HotkeyManager's callback fires from a synchronous Carbon C callback,
-        // which can't itself be async - hop to the main actor. Cmd+` is a
+        // which can't itself be async - hop to the main actor. Cmd+' is a
         // toggle: while a type runs it STOPS it; otherwise it types the whole
         // clipboard. The target window keeps focus (unlike opening the menu), so
         // no focus juggling is needed.
@@ -113,7 +113,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         if !hotkeyManager.register() {
             NotificationManager.show(
                 title: "pype",
-                body: "Could not register the Cmd+` hotkey. It may already be in use by another app or by the macOS \"move focus to next window\" shortcut."
+                body: "Could not register the Cmd+' hotkey. It may already be in use by another app."
             )
         }
     }
@@ -253,7 +253,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "\(AppInfo.displayName) \(AppInfo.version)"
         alert.informativeText = """
-            Press Cmd+` anywhere to type the clipboard's text content wherever your cursor is.
+            Press Cmd+' anywhere to type the clipboard's text content wherever your cursor is.
 
             Press the same shortcut again to stop a type in progress.
             """

@@ -14,7 +14,7 @@ enum ClipboardTyper {
     ///   Windows' SendInput does, so this reports whether the OS would even
     ///   let us try, not whether every keystroke landed.
     ///
-    /// Honors task cancellation between characters (pressing Cmd+` again
+    /// Honors task cancellation between characters (pressing Cmd+' again
     /// cancels the enclosing Task), which matters most for a large clipboard.
     @discardableResult
     static func type(_ text: String) async -> Bool {

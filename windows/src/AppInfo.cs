@@ -21,7 +21,7 @@ internal static class AppInfo
     /// <summary>Named mutex used to prevent a second instance from registering the hotkey twice.</summary>
     public const string MutexName = "Local\\Pype.SingleInstance.Mutex";
 
-    /// <summary>Id for the single global hotkey (Ctrl+`) that types the clipboard.</summary>
+    /// <summary>Id for the single global hotkey (Ctrl+') that types the clipboard.</summary>
     public const int HotkeyId = 0xB001;
 
     /// <summary>Project home, shown/linked in the About dialog.</summary>

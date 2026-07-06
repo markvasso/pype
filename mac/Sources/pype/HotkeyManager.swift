@@ -4,11 +4,11 @@
 import Carbon.HIToolbox
 import AppKit
 
-/// Registers Cmd+` (Command + backtick) as a global hotkey via Carbon's
-/// RegisterEventHotKey. Cmd (not Ctrl) mirrors the Windows build's Ctrl+`;
-/// backtick was chosen because it rarely collides with app shortcuts. Note
-/// macOS assigns Cmd+` to "move focus to next window" system-wide, so if that
-/// system shortcut is enabled this registration may not win — see the README.
+/// Registers Cmd+' (Command + apostrophe) as a global hotkey via Carbon's
+/// RegisterEventHotKey. Cmd (not Ctrl) mirrors the Windows build's Ctrl+'.
+/// kVK_ANSI_Quote is a physical-position key code that lands on the apostrophe
+/// key for US and most Latin layouts. Unlike Cmd+` (which is the system's
+/// "move focus to next window" shortcut), Cmd+' isn't a reserved macOS shortcut.
 ///
 /// This (still fully supported, not deprecated) API is used deliberately
 /// instead of a CGEventTap or NSEvent global monitor: those require the
@@ -27,7 +27,7 @@ final class HotkeyManager {
     var onHotkey: (() -> Void)?
 
     /// True if the hotkey was registered successfully. False most commonly
-    /// means another app or the system already claimed Cmd+`.
+    /// means another app already claimed Cmd+'.
     @discardableResult
     func register() -> Bool {
         var eventType = EventTypeSpec(
@@ -60,14 +60,14 @@ final class HotkeyManager {
 
         let hotKeyID = EventHotKeyID(signature: Self.signature, id: Self.hotKeyID)
         let modifiers = UInt32(cmdKey)
-        let keyCode = UInt32(kVK_ANSI_Grave)
+        let keyCode = UInt32(kVK_ANSI_Quote)
 
         let registerStatus = RegisterEventHotKey(
             keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef
         )
         guard registerStatus == noErr else {
             // InstallEventHandler succeeded above but the hotkey itself didn't
-            // (most commonly: another app or the system already owns Cmd+`) -
+            // (most commonly: another app already owns Cmd+') -
             // these are two independent Carbon calls with no automatic rollback,
             // so without this the event handler installed above would otherwise
             // leak for the rest of the process's lifetime.

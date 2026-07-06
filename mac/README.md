@@ -3,16 +3,13 @@
 A menu bar port of [pype](../README.md) (see the [Windows
 README](../windows/README.md) for the full project background — that's
 where this project started). Same behavior as the Windows version: press
-**Cmd+`** anywhere to type the clipboard's text content, and press it again to
+**Cmd+'** anywhere to type the clipboard's text content, and press it again to
 stop a type in progress. The menu bar item just states the shortcut — typing is
-hotkey-only so the target window keeps focus. The backtick key was chosen
+hotkey-only so the target window keeps focus. The apostrophe key was chosen
 because it rarely collides with app shortcuts; Cmd (rather than the Windows
-build's Ctrl) is just the Mac-native primary modifier.
-
-**Note:** macOS assigns **Cmd+`** to "move focus to next window" system-wide.
-If that system shortcut is enabled it may take precedence — disable it under
-System Settings > Keyboard > Keyboard Shortcuts > Keyboard if pype's hotkey
-doesn't fire.
+build's Ctrl) is just the Mac-native primary modifier. (Unlike Cmd+backtick,
+which is the system "move focus to next window" shortcut, Cmd+' isn't reserved
+by macOS.)
 
 The one real platform difference is Accessibility permission — keystroke
 injection needs it, and on these unsigned builds the grant doesn't survive
@@ -155,7 +152,7 @@ LaunchAgent plist file — `SMAppService.mainApp` manages that internally).
 
 Copy any text to the clipboard, click wherever you want it typed, then:
 
-- **Cmd+`** — types the clipboard's text content.
+- **Cmd+'** — types the clipboard's text content.
 - **Press it again** — stops a type in progress cleanly (pype keeps running).
 
 Typing is hotkey-only, so your target window keeps focus and the keystrokes
@@ -192,7 +189,7 @@ in System Settings), and a `postinstall` edge case where installing at the
 login screen (`/dev/console` reporting `loginwindow`, not a real user) would
 have tried to launch the app as that system account.
 
-What wasn't tested end-to-end: actually pressing **Cmd+`** after granting
+What wasn't tested end-to-end: actually pressing **Cmd+'** after granting
 Accessibility permission and confirming text types into a real target app —
 that needs an interactive permission grant this environment didn't have a way
 to click through (screen-recording/computer-use access was offered and
@@ -200,9 +197,9 @@ declined). Worth a real test before relying on it.
 
 ## Known limitations
 
-- **One hotkey**: Cmd+` is fixed, not configurable (Windows' equivalent is
-  Ctrl+`). It can also collide with the macOS "move focus to next window"
-  shortcut — see the intro.
+- **One hotkey**: Cmd+' is fixed, not configurable (Windows' equivalent is
+  Ctrl+'). `kVK_ANSI_Quote` is a physical-position key code, so on a non-US
+  layout it may sit on a different character than the apostrophe.
 - **Plain text only**: reads whatever `NSPasteboard.general.string(forType:
   .string)` returns.
 - **macOS 13+ only**: `SMAppService` (Run at Login) requires Ventura or
